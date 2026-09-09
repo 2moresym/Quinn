@@ -8,7 +8,7 @@ use std::{
 const TARGET_RATE: u32 = 16_000;
 const CAPTURE_SECONDS: u64 = 4;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct VoiceEngine {
     #[cfg(feature = "voice")]
     model: Arc<vosk::Model>,
@@ -94,16 +94,14 @@ fn capture_audio() -> Result<(Vec<f32>, u32), String> {
     let config: cpal::StreamConfig = supported.clone().into();
 
     let stream = match supported.sample_format() {
-        cpal::SampleFormat::F32 => {
-            device
-                .build_input_stream(
-                    &config,
-                    move |data: &[f32], _| push_mono(data, channels, &callback_samples),
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| format!("could not open microphone stream: {e}"))?
-        }
+        cpal::SampleFormat::F32 => device
+            .build_input_stream(
+                &config,
+                move |data: &[f32], _| push_mono(data, channels, &callback_samples),
+                err_fn,
+                None,
+            )
+            .map_err(|e| format!("could not open microphone stream: {e}"))?,
         cpal::SampleFormat::I16 => {
             let callback_samples = Arc::clone(&samples);
             device
@@ -129,7 +127,10 @@ fn capture_audio() -> Result<(Vec<f32>, u32), String> {
                     move |data: &[u16], _| {
                         let mut out = callback_samples.lock().expect("microphone mutex poisoned");
                         for frame in data.chunks(channels) {
-                            let sum: f32 = frame.iter().map(|s| (*s as f32 / 65535.0) * 2.0 - 1.0).sum();
+                            let sum: f32 = frame
+                                .iter()
+                                .map(|s| (*s as f32 / 65535.0) * 2.0 - 1.0)
+                                .sum();
                             out.push(sum / frame.len() as f32);
                         }
                     },
@@ -175,6 +176,9 @@ fn resample_to_16khz(input: &[f32], source_rate: u32) -> Vec<i16> {
             .collect();
     }
 
+    if input.is_empty() {
+        return Vec::new();
+    }
     let output_len = ((input.len() as u64 * TARGET_RATE as u64) / source_rate as u64) as usize;
     let ratio = source_rate as f64 / TARGET_RATE as f64;
     let mut output = Vec::with_capacity(output_len);
