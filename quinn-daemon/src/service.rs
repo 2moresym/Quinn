@@ -3,9 +3,12 @@ use std::sync::Arc;
 use needle_infer::v2_engine::V2Engine;
 use serde_json::json;
 use tracing::{info, warn};
-use zbus::{interface, object_server::SignalEmitter, fdo};
+use zbus::{fdo, interface, object_server::SignalEmitter};
 
-use crate::{commands::split_utterance, tools::{self, ToolCall, TOOL_SCHEMAS}};
+use crate::{
+    commands::split_utterance,
+    tools::{self, ToolCall, TOOL_SCHEMAS},
+};
 
 const CONFIDENCE_THRESHOLD: f32 = 0.70;
 
@@ -25,7 +28,10 @@ impl QuinnDaemon {
         }
 
         let Some(raw_call) = result.tool_call.as_deref() else {
-            return ("I didn't find an action for that command.".to_string(), None);
+            return (
+                "I didn't find an action for that command.".to_string(),
+                None,
+            );
         };
 
         let confidence = self
@@ -33,8 +39,14 @@ impl QuinnDaemon {
             .confidence_for(fragment, TOOL_SCHEMAS, &result.text)
             .unwrap_or(0.0);
         if confidence < CONFIDENCE_THRESHOLD {
-            warn!(query = fragment, confidence, "tool call rejected by confidence gate");
-            return ("I'm not confident enough to run that command.".to_string(), None);
+            warn!(
+                query = fragment,
+                confidence, "tool call rejected by confidence gate"
+            );
+            return (
+                "I'm not confident enough to run that command.".to_string(),
+                None,
+            );
         }
 
         let call = match tools::parse_tool_call(raw_call) {
@@ -44,7 +56,10 @@ impl QuinnDaemon {
 
         match tools::execute(&call) {
             Ok(message) => ("Done.".to_string(), Some((call, message))),
-            Err(message) => (format!("I couldn't complete that: {message}"), Some((call, message))),
+            Err(message) => (
+                format!("I couldn't complete that: {message}"),
+                Some((call, message)),
+            ),
         }
     }
 }
@@ -64,7 +79,10 @@ impl QuinnDaemon {
     ) -> fdo::Result<(String, String)> {
         let query = query.trim();
         if query.is_empty() {
-            return Ok(("Tell me what you want me to do.".to_string(), "[]".to_string()));
+            return Ok((
+                "Tell me what you want me to do.".to_string(),
+                "[]".to_string(),
+            ));
         }
 
         let mut responses = Vec::new();
@@ -75,7 +93,10 @@ impl QuinnDaemon {
             responses.push(response);
             if let Some((call, result)) = event {
                 let event_json = tools::event_json(&call, &result);
-                if let Err(e) = emitter.tool_executed(&call.name, &call.arguments.to_string(), &result).await {
+                if let Err(e) = emitter
+                    .tool_executed(&call.name, &call.arguments.to_string(), &result)
+                    .await
+                {
                     warn!(error = %e, "failed to emit ToolExecuted signal");
                 }
                 executed.push(event_json);
