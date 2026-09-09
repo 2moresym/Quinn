@@ -6,6 +6,7 @@ use tracing::{info, warn};
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
 use crate::{
+    app_classifier::AppClassifier,
     apps::AppCatalog,
     commands::split_utterance,
     tools::{self, ToolCall, TOOL_SCHEMAS},
@@ -17,6 +18,7 @@ const CONFIDENCE_THRESHOLD: f32 = 0.70;
 pub struct QuinnDaemon {
     engine: Arc<V2Engine>,
     apps: Arc<AppCatalog>,
+    classifier: Arc<AppClassifier>,
     voice: Option<Arc<VoiceEngine>>,
 }
 
@@ -24,11 +26,13 @@ impl QuinnDaemon {
     pub fn new(
         engine: Arc<V2Engine>,
         apps: Arc<AppCatalog>,
+        classifier: Arc<AppClassifier>,
         voice: Option<Arc<VoiceEngine>>,
     ) -> Self {
         Self {
             engine,
             apps,
+            classifier,
             voice,
         }
     }
@@ -66,7 +70,7 @@ impl QuinnDaemon {
             Err(e) => return (format!("I couldn't understand the tool call: {e}"), None),
         };
 
-        match tools::execute(&call, &self.apps) {
+        match tools::execute(&call, &self.apps, &self.classifier) {
             Ok(message) => ("Done.".to_string(), Some((call, message))),
             Err(message) => (
                 format!("I couldn't complete that: {message}"),
@@ -121,15 +125,18 @@ impl QuinnDaemon {
             responses.join(" ")
         };
         let tool_calls = json!(executed).to_string();
-        info!(query, app_count = self.apps.len(), "handled request");
+        info!(
+            query,
+            app_count = self.apps.len(),
+            classified_app_count = self.classifier.len(),
+            "handled request"
+        );
         Ok((response, tool_calls))
     }
 
     /// Capture a short microphone utterance and transcribe it locally.
     ///
-    /// This only performs speech-to-text. The returned text is intentionally fed
-    /// through the same `Ask` method by the GNOME extension, so typed and spoken
-    /// requests share one intent/tool/confidence pipeline.
+    /// The returned text can be sent through the same `Ask` method as typed input.
     #[zbus(out_args("text"))]
     async fn listen(&self) -> fdo::Result<String> {
         let Some(voice) = self.voice.clone() else {
