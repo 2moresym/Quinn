@@ -1,0 +1,14 @@
+[Unit]
+Description=Quinn local AI assistant daemon
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/quinn-daemon
+Restart=on-failure
+RestartSec=2
+Environment=RUST_LOG=quinn_daemon=info
+
+[Install]
+WantedBy=graphical-session.target
