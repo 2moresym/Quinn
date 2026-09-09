@@ -1,0 +1,8 @@
+{
+  "uuid": "quinn@2moresym.org",
+  "name": "Quinn",
+  "description": "Local-only AI command assistant powered by a Rust daemon and Needle v2.",
+  "version": 1,
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "session-modes": ["user"]
+}
