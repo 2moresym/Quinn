@@ -8,7 +8,8 @@ pub const TOOL_SCHEMAS: &str = r#"[
 {"name":"open_application","description":"Open an installed desktop application by name or a generic type such as browser, chat, terminal, file manager, editor, media player, or game","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
 {"name":"open_terminal","description":"Open the user's installed terminal application","parameters":{"type":"object","properties":{},"required":[]}},
 {"name":"set_volume","description":"Set the default audio output volume to an integer percentage from 0 to 100","parameters":{"type":"object","properties":{"percent":{"type":"integer","minimum":0,"maximum":100}},"required":["percent"]}},
-{"name":"set_brightness","description":"Set the display brightness to an integer percentage from 0 to 100","parameters":{"type":"object","properties":{"percent":{"type":"integer","minimum":0,"maximum":100}},"required":["percent"]}}
+{"name":"set_brightness","description":"Set the display brightness to an integer percentage from 0 to 100","parameters":{"type":"object","properties":{"percent":{"type":"integer","minimum":0,"maximum":100}},"required":["percent"]}},
+{"name":"search_files","description":"Search the user's home directory for files whose names contain a query; returns a small deterministic list of matching paths","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}
 ]"#;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -63,6 +64,14 @@ pub fn execute(
                 .and_then(Value::as_i64)
                 .ok_or("missing brightness percent")?;
             set_brightness(percent)
+        }
+        "search_files" => {
+            let query = call
+                .arguments
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or("missing file search query")?;
+            search_files(query)
         }
         other => Err(format!("unknown tool: {other}")),
     }
@@ -174,6 +183,39 @@ fn set_brightness(percent: i64) -> Result<String, String> {
     }
 
     Err("brightnessctl is not available or could not set the display brightness".to_string())
+}
+
+fn search_files(query: &str) -> Result<String, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("file search query cannot be empty".to_string());
+    }
+    if query.len() > 128 {
+        return Err("file search query is too long".to_string());
+    }
+
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "HOME is not set".to_string())?;
+
+    let pattern = format!("*{query}*");
+    let output = Command::new("find")
+        .arg(&home)
+        .args(["-maxdepth", "6", "-type", "f", "-iname"])
+        .arg(&pattern)
+        .args(["-print", "-quit"])
+        .output()
+        .map_err(|e| format!("failed to search files: {e}"))?;
+
+    if !output.status.success() && output.stdout.is_empty() {
+        return Err("file search failed".to_string());
+    }
+
+    let first = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if first.is_empty() {
+        return Ok(format!("no files matching '{query}' were found"));
+    }
+
+    Ok(format!("found file: {first}"))
 }
 
 pub fn event_json(call: &ToolCall, result: &str) -> String {
