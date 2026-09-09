@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::process::Command;
 
-use crate::apps::AppCatalog;
+use crate::{app_classifier::AppClassifier, apps::AppCatalog};
 
 pub const TOOL_SCHEMAS: &str = r#"[
-{"name":"open_application","description":"Open an installed desktop application by name","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
+{"name":"open_application","description":"Open an installed desktop application by name or a generic type such as browser, chat, terminal, file manager, editor, media player, or game","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
 {"name":"open_terminal","description":"Open the user's installed terminal application","parameters":{"type":"object","properties":{},"required":[]}},
 {"name":"set_volume","description":"Set the default audio output volume to an integer percentage from 0 to 100","parameters":{"type":"object","properties":{"percent":{"type":"integer","minimum":0,"maximum":100}},"required":["percent"]}},
 {"name":"set_brightness","description":"Set the display brightness to an integer percentage from 0 to 100","parameters":{"type":"object","properties":{"percent":{"type":"integer","minimum":0,"maximum":100}},"required":["percent"]}}
@@ -33,7 +33,11 @@ pub fn parse_tool_call(raw: &str) -> Result<ToolCall, String> {
     }
 }
 
-pub fn execute(call: &ToolCall, apps: &AppCatalog) -> Result<String, String> {
+pub fn execute(
+    call: &ToolCall,
+    apps: &AppCatalog,
+    classifier: &AppClassifier,
+) -> Result<String, String> {
     match call.name.as_str() {
         "open_application" => {
             let name = call
@@ -41,7 +45,7 @@ pub fn execute(call: &ToolCall, apps: &AppCatalog) -> Result<String, String> {
                 .get("name")
                 .and_then(Value::as_str)
                 .ok_or("missing application name")?;
-            open_application(name, apps)
+            open_application(name, apps, classifier)
         }
         "open_terminal" => open_terminal(),
         "set_volume" => {
@@ -82,7 +86,31 @@ fn open_terminal() -> Result<String, String> {
     Err("no supported terminal application was found".to_string())
 }
 
-fn open_application(requested: &str, apps: &AppCatalog) -> Result<String, String> {
+fn open_application(
+    requested: &str,
+    apps: &AppCatalog,
+    classifier: &AppClassifier,
+) -> Result<String, String> {
+    if let Some(classified) = classifier.resolve_type(requested) {
+        let candidates = classifier.type_candidates(requested, 2);
+        if candidates.len() > 1 {
+            return Err(format!(
+                "multiple {} applications are installed: {}; please name one explicitly",
+                classified.app_type.as_str(),
+                candidates
+                    .iter()
+                    .map(|app| app.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        Command::new("gtk-launch")
+            .arg(&classified.id)
+            .spawn()
+            .map_err(|e| format!("failed to launch {}: {e}", classified.name))?;
+        return Ok(format!("opened {} ({})", classified.name, classified.app_type.as_str()));
+    }
+
     let app = apps.resolve(requested).ok_or_else(|| {
         let candidates = apps.candidate_names(requested, 3);
         if candidates.is_empty() {
