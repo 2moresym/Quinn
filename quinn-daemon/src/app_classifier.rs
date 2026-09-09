@@ -42,6 +42,16 @@ pub struct ClassifiedApp {
     pub desktop_file: PathBuf,
 }
 
+impl ClassifiedApp {
+    pub fn capabilities(&self) -> &[String] {
+        &self.capabilities
+    }
+
+    pub fn desktop_file(&self) -> &std::path::Path {
+        &self.desktop_file
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct AppClassifier {
     apps: Vec<ClassifiedApp>,

@@ -13,6 +13,16 @@ pub struct AppEntry {
     pub desktop_file: PathBuf,
 }
 
+impl AppEntry {
+    pub fn generic_name(&self) -> Option<&str> {
+        self.generic_name.as_deref()
+    }
+
+    pub fn desktop_file(&self) -> &Path {
+        &self.desktop_file
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct AppCatalog {
     apps: Vec<AppEntry>,

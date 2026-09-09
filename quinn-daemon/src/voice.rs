@@ -1,3 +1,4 @@
+#[cfg(feature = "voice")]
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -5,7 +6,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "voice")]
 const TARGET_RATE: u32 = 16_000;
+#[cfg(feature = "voice")]
 const CAPTURE_SECONDS: u64 = 4;
 
 #[derive(Clone)]
@@ -31,10 +34,7 @@ impl VoiceEngine {
 
         #[cfg(not(feature = "voice"))]
         {
-            Err(
-                "voice support is not compiled; rebuild quinn-daemon with --features voice"
-                    .to_string(),
-            )
+            Err("voice support is not compiled; rebuild quinn-daemon with --features voice".to_string())
         }
     }
 
