@@ -34,19 +34,29 @@ class QuinnButton extends PanelMenu.Button {
             can_focus: false,
         });
         const box = new St.BoxLayout({vertical: true, style_class: 'quinn-popup-box'});
+        const inputRow = new St.BoxLayout({style_class: 'quinn-input-row'});
         this._entry = new St.Entry({
             hint_text: 'Ask Quinn…',
             can_focus: true,
             track_hover: true,
+            x_expand: true,
         });
+        this._voice = new St.Button({
+            label: '🎙',
+            style_class: 'quinn-voice-button',
+            can_focus: true,
+        });
+        inputRow.add_child(this._entry);
+        inputRow.add_child(this._voice);
         this._status = new St.Label({text: 'Ready', style_class: 'quinn-status'});
-        box.add_child(this._entry);
+        box.add_child(inputRow);
         box.add_child(this._status);
         item.add_child(box);
         section.addMenuItem(item);
         this.menu.addMenuItem(section);
 
         this._entry.clutter_text.connect('activate', () => this._submit());
+        this._voice.connect('clicked', () => this._listen());
         this.menu.connect('open-state-changed', (_menu, open) => {
             if (open)
                 this._entry.grab_key_focus();
@@ -71,7 +81,10 @@ class QuinnButton extends PanelMenu.Button {
         const query = this._entry.get_text().trim();
         if (!query || !this._proxy)
             return;
+        this._ask(query);
+    }
 
+    _ask(query) {
         this._status.set_text('Working…');
         this._proxy.call(
             'Ask',
@@ -86,6 +99,37 @@ class QuinnButton extends PanelMenu.Button {
                 } catch (e) {
                     logError(e, 'Quinn D-Bus request failed');
                     this._status.set_text('Quinn is unavailable.');
+                }
+            },
+        );
+    }
+
+    _listen() {
+        if (!this._proxy)
+            return;
+
+        this._status.set_text('Listening…');
+        this._voice.reactive = false;
+        this._proxy.call(
+            'Listen',
+            null,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            (proxy, result) => {
+                this._voice.reactive = true;
+                try {
+                    const reply = proxy.call_finish(result).deep_unpack();
+                    const text = reply[0]?.trim() ?? '';
+                    if (!text) {
+                        this._status.set_text('No speech detected.');
+                        return;
+                    }
+                    this._entry.set_text(text);
+                    this._ask(text);
+                } catch (e) {
+                    logError(e, 'Quinn voice request failed');
+                    this._status.set_text('Voice input is unavailable.');
                 }
             },
         );
