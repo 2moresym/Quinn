@@ -24,7 +24,7 @@ Rust quinn-daemon
 - `Ask(s)` returning `(response, tool_calls)`.
 - `Ready` property.
 - `ToolExecuted` signal.
-- Tools: `open_application`, `open_terminal`, `set_volume`.
+- Tools: `open_application`, `open_terminal`, `set_volume`, `set_brightness`.
 - Deterministic splitting of multi-command requests (`and`, `then`, `+`, comma).
 - Confidence threshold of 0.70 before execution.
 - GNOME Shell panel button, popup entry, and `Super+Space` shortcut.
@@ -80,7 +80,7 @@ busctl --user call org.quinn.Assistant /org/quinn/Assistant org.quinn.Assistant 
 ### Stage 3 — voice and richer actions
 - [ ] Add prerecorded `.ogg` acknowledgements with `rodio`
 - [ ] Add failure/low-confidence voice feedback
-- [ ] Add `set_brightness(percent)`
+- [x] Add `set_brightness(percent)`
 - [ ] Add `search_files(query)`
 - [ ] Add `create_reminder(text, when)`
 - [ ] Expand desktop-app resolution edge cases
