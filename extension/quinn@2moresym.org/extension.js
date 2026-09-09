@@ -1,5 +1,6 @@
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -51,15 +52,19 @@ class QuinnButton extends PanelMenu.Button {
                 this._entry.grab_key_focus();
         });
 
-        this._proxy = Gio.DBusProxy.new_for_bus_sync(
-            Gio.BusType.SESSION,
-            Gio.DBusProxyFlags.NONE,
-            null,
-            BUS_NAME,
-            OBJECT_PATH,
-            INTERFACE,
-            null,
-        );
+        try {
+            this._proxy = Gio.DBusProxy.new_for_bus_sync(
+                Gio.BusType.SESSION,
+                Gio.DBusProxyFlags.NONE,
+                null,
+                BUS_NAME,
+                OBJECT_PATH,
+                INTERFACE,
+                null,
+            );
+        } catch (e) {
+            logError(e, 'Quinn D-Bus service is unavailable');
+        }
     }
 
     _submit() {
@@ -68,7 +73,6 @@ class QuinnButton extends PanelMenu.Button {
             return;
 
         this._status.set_text('Working…');
-        this._entry.set_text('');
         this._proxy.call(
             'Ask',
             new GLib.Variant('(s)', [query]),
