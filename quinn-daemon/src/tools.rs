@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::process::Command;
+
+use crate::apps::AppCatalog;
 
 pub const TOOL_SCHEMAS: &str = r#"[
 {"name":"open_application","description":"Open an installed desktop application by name","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}},
@@ -35,7 +33,7 @@ pub fn parse_tool_call(raw: &str) -> Result<ToolCall, String> {
     }
 }
 
-pub fn execute(call: &ToolCall) -> Result<String, String> {
+pub fn execute(call: &ToolCall, apps: &AppCatalog) -> Result<String, String> {
     match call.name.as_str() {
         "open_application" => {
             let name = call
@@ -43,7 +41,7 @@ pub fn execute(call: &ToolCall) -> Result<String, String> {
                 .get("name")
                 .and_then(Value::as_str)
                 .ok_or("missing application name")?;
-            open_application(name)
+            open_application(name, apps)
         }
         "open_terminal" => open_terminal(),
         "set_volume" => {
@@ -84,89 +82,25 @@ fn open_terminal() -> Result<String, String> {
     Err("no supported terminal application was found".to_string())
 }
 
-fn open_application(requested: &str) -> Result<String, String> {
-    let requested_norm = normalize(requested);
-    let desktop = find_desktop_file(&requested_norm)
-        .ok_or_else(|| format!("could not find installed application '{requested}'"))?;
-    let desktop_id = desktop_id(&desktop)?;
+fn open_application(requested: &str, apps: &AppCatalog) -> Result<String, String> {
+    let app = apps.resolve(requested).ok_or_else(|| {
+        let candidates = apps.candidate_names(requested, 3);
+        if candidates.is_empty() {
+            format!("could not find installed application '{requested}'")
+        } else {
+            format!(
+                "could not confidently match '{requested}'; candidates: {}",
+                candidates.join(", ")
+            )
+        }
+    })?;
 
     Command::new("gtk-launch")
-        .arg(&desktop_id)
+        .arg(&app.id)
         .spawn()
-        .map_err(|e| format!("failed to launch {requested}: {e}"))?;
+        .map_err(|e| format!("failed to launch {}: {e}", app.name))?;
 
-    Ok(format!("opened {requested}"))
-}
-
-fn find_desktop_file(requested: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let mut dirs = Vec::with_capacity(4);
-    if let Some(home) = home {
-        dirs.push(home.join(".local/share/applications"));
-    }
-    dirs.push(PathBuf::from("/usr/local/share/applications"));
-    dirs.push(PathBuf::from("/usr/share/applications"));
-    dirs.push(PathBuf::from("/usr/share/gnome/applications"));
-
-    let mut best: Option<(u8, PathBuf)> = None;
-    for dir in dirs {
-        scan_desktop_dir(&dir, requested, &mut best);
-    }
-    best.map(|(_, path)| path)
-}
-
-fn scan_desktop_dir(dir: &Path, requested: &str, best: &mut Option<(u8, PathBuf)>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|v| v.to_str()) != Some("desktop") {
-            continue;
-        }
-        let Ok(contents) = fs::read_to_string(&path) else {
-            continue;
-        };
-        if contents.lines().any(|line| {
-            line.eq_ignore_ascii_case("NoDisplay=true") || line.eq_ignore_ascii_case("Hidden=true")
-        }) {
-            continue;
-        }
-
-        let stem = path
-            .file_stem()
-            .and_then(|v| v.to_str())
-            .unwrap_or_default();
-        let stem_norm = normalize(stem);
-        let name_match = contents
-            .lines()
-            .filter_map(|line| line.strip_prefix("Name="))
-            .map(normalize)
-            .any(|name| name == requested);
-
-        let score = if stem_norm == requested {
-            0
-        } else if name_match {
-            1
-        } else if stem_norm.replace('-', " ").contains(requested) || requested.contains(&stem_norm)
-        {
-            2
-        } else {
-            continue;
-        };
-
-        if best.as_ref().map_or(true, |(old, _)| score < *old) {
-            *best = Some((score, path));
-        }
-    }
-}
-
-fn desktop_id(path: &Path) -> Result<String, String> {
-    path.file_name()
-        .and_then(|v| v.to_str())
-        .and_then(|v| v.strip_suffix(".desktop"))
-        .map(str::to_string)
-        .ok_or_else(|| format!("invalid desktop entry path: {}", path.display()))
+    Ok(format!("opened {}", app.name))
 }
 
 fn set_volume(percent: i64) -> Result<String, String> {
@@ -212,16 +146,6 @@ fn set_brightness(percent: i64) -> Result<String, String> {
     }
 
     Err("brightnessctl is not available or could not set the display brightness".to_string())
-}
-
-fn normalize(input: &str) -> String {
-    input
-        .trim()
-        .to_ascii_lowercase()
-        .replace(['_', '-', '.'], " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub fn event_json(call: &ToolCall, result: &str) -> String {
