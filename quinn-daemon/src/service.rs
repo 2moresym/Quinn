@@ -9,6 +9,7 @@ use crate::{
     apps::AppCatalog,
     commands::split_utterance,
     tools::{self, ToolCall, TOOL_SCHEMAS},
+    voice::VoiceEngine,
 };
 
 const CONFIDENCE_THRESHOLD: f32 = 0.70;
@@ -16,11 +17,20 @@ const CONFIDENCE_THRESHOLD: f32 = 0.70;
 pub struct QuinnDaemon {
     engine: Arc<V2Engine>,
     apps: Arc<AppCatalog>,
+    voice: Option<Arc<VoiceEngine>>,
 }
 
 impl QuinnDaemon {
-    pub fn new(engine: Arc<V2Engine>, apps: Arc<AppCatalog>) -> Self {
-        Self { engine, apps }
+    pub fn new(
+        engine: Arc<V2Engine>,
+        apps: Arc<AppCatalog>,
+        voice: Option<Arc<VoiceEngine>>,
+    ) -> Self {
+        Self {
+            engine,
+            apps,
+            voice,
+        }
     }
 
     fn execute_fragment(&self, fragment: &str) -> (String, Option<(ToolCall, String)>) {
@@ -113,6 +123,23 @@ impl QuinnDaemon {
         let tool_calls = json!(executed).to_string();
         info!(query, app_count = self.apps.len(), "handled request");
         Ok((response, tool_calls))
+    }
+
+    /// Capture a short microphone utterance and transcribe it locally.
+    ///
+    /// This only performs speech-to-text. The returned text is intentionally fed
+    /// through the same `Ask` method by the GNOME extension, so typed and spoken
+    /// requests share one intent/tool/confidence pipeline.
+    #[zbus(out_args("text"))]
+    async fn listen(&self) -> fdo::Result<String> {
+        let Some(voice) = self.voice.clone() else {
+            return Err(fdo::Error::Failed("voice backend is unavailable".to_string()));
+        };
+
+        tokio::task::spawn_blocking(move || voice.listen())
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("voice task failed: {e}")))?
+            .map_err(fdo::Error::Failed)
     }
 
     #[zbus(signal)]
