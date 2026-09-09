@@ -8,7 +8,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import * as ExtensionUtils from 'resource:///org/gnome/shell/misc/extensionUtils.js';
+import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const BUS_NAME = 'org.quinn.Assistant';
 const OBJECT_PATH = '/org/quinn/Assistant';
@@ -33,13 +33,13 @@ class QuinnButton extends PanelMenu.Button {
             activate: false,
             can_focus: false,
         });
-        const box = new St.BoxLayout({ vertical: true, style_class: 'quinn-popup-box' });
+        const box = new St.BoxLayout({vertical: true, style_class: 'quinn-popup-box'});
         this._entry = new St.Entry({
             hint_text: 'Ask Quinn…',
             can_focus: true,
             track_hover: true,
         });
-        this._status = new St.Label({ text: 'Ready', style_class: 'quinn-status' });
+        this._status = new St.Label({text: 'Ready', style_class: 'quinn-status'});
         box.add_child(this._entry);
         box.add_child(this._status);
         item.add_child(box);
@@ -92,9 +92,9 @@ class QuinnButton extends PanelMenu.Button {
     }
 });
 
-export default class QuinnExtension {
+export default class QuinnExtension extends Extension {
     enable() {
-        this._settings = ExtensionUtils.getSettings();
+        this._settings = this.getSettings();
         this._button = new QuinnButton();
         Main.panel.addToStatusArea('quinn', this._button);
         Main.wm.addKeybinding(
