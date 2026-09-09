@@ -1,0 +1,120 @@
+QUINN — AI HANDOFF MEMORY
+Updated: 2026-09-09
+Repo: 2moresym/Quinn
+Branch: main
+Project: Quinn, a local-only GNOME AI command assistant.
+
+ARCHITECTURE
+- GNOME Shell extension is GJS/JS only.
+- Rust quinn-daemon owns Needle inference and tool execution.
+- UI talks to daemon over session D-Bus.
+- D-Bus name: org.quinn.Assistant
+- Object path: /org/quinn/Assistant
+- Interface: org.quinn.Assistant
+- Ask(query: string) -> (response: string, tool_calls: JSON string)
+- Signal: ToolExecuted(name, args, result)
+- Property: Ready: bool
+
+MODEL
+- Use Needle v2, NOT the old v1-only loading plan.
+- Current needle-rs release verified: v0.2.1.
+- Rust API: needle_infer::v2_engine::V2Engine.
+- Model file: Cactus-Compute/needle2/needle2.cact (~13.7 MB).
+- Default local path: ~/.local/share/quinn/weights/needle2.cact
+- Override with QUINN_MODEL.
+- Model runtime is pure Rust; no Python runtime dependency.
+
+DONE — STAGE 1 FOUNDATION
+[x] Cargo workspace
+[x] quinn-daemon crate
+[x] Load Needle v2 once at daemon startup
+[x] D-Bus service + Ask + Ready + ToolExecuted
+[x] Tool JSON schemas
+[x] open_application
+[x] open_terminal
+[x] set_volume
+[x] deterministic multi-command splitting: and / then / + / comma
+[x] confidence gate at 0.70
+[x] Rust CI: fmt/check/clippy
+
+DONE — STAGE 2 GNOME BASE
+[x] Extension metadata targeting GNOME Shell 45-50
+[x] Modern GNOME Extension base class
+[x] Panel indicator
+[x] Popup text entry
+[x] D-Bus async Ask call
+[x] Super+Space keybinding
+[x] Extension stylesheet
+[x] GSettings schema
+[x] systemd --user unit
+[x] install.sh bootstrap
+
+NEXT IMMEDIATE TASKS
+1. Verify Rust CI/build on GitHub and fix any compiler/clippy errors.
+2. Fix/verify extension behavior on the actual installed GNOME Shell version.
+3. Show live executing state in popup and better daemon-unavailable handling.
+4. Add prerecorded voice acknowledgements using rodio.
+5. Add set_brightness(percent).
+6. Add search_files(query) safely.
+7. Add create_reminder(text, when).
+
+STAGE 3 — VOICE + ACTIONS
+[ ] prerecorded .ogg/.wav acknowledgement clips
+[ ] rodio playback on successful tool execution
+[ ] distinct failure/low-confidence feedback
+[ ] set_brightness(percent)
+[ ] search_files(query)
+[ ] create_reminder(text, when)
+[ ] improve .desktop application resolution
+
+STAGE 4 — PERFORMANCE + RELIABILITY
+[ ] cold/warm inference benchmarks
+[ ] reuse V2 inference state where safe
+[ ] reduce confidence-gate memory churn (v2 confidence head can need a full causal cache)
+[ ] integration tests for D-Bus
+[ ] tool execution tests
+[ ] structured diagnostics/logging
+[ ] startup/restart testing under systemd --user
+
+STAGE 5 — OPTIONAL CHAT
+[ ] Decide whether to add a second local conversational model.
+[ ] Keep Needle focused on routing/tool calls.
+[ ] Keep command-only mode as the low-resource default.
+
+STAGE 6 — PACKAGING
+[ ] verify exact supported GNOME Shell range
+[ ] Debian/GNOME packaging
+[ ] uninstall script
+[ ] release artifacts
+
+IMPORTANT DESIGN RULES
+- Local-only: no cloud/API calls.
+- No Python at runtime.
+- Keep GNOME extension thin; Rust owns inference/tools.
+- Needle v2 normally maps one utterance to one call; split multi-command input before inference.
+- Never blindly execute low-confidence tool calls.
+- Do not turn Quinn into a general chat app unless a second local model is explicitly added.
+
+CURRENT FILE MAP
+Cargo.toml — workspace
+quinn-daemon/Cargo.toml — daemon dependencies
+quinn-daemon/src/main.rs — model/service startup
+quinn-daemon/src/service.rs — D-Bus interface + request orchestration
+quinn-daemon/src/tools.rs — schemas, parsing, local tools
+quinn-daemon/src/commands.rs — multi-command splitter + tests
+extension/quinn@2moresym.org/metadata.json — extension metadata
+extension/quinn@2moresym.org/extension.js — GNOME UI/client
+extension/quinn@2moresym.org/stylesheet.css — popup styling
+extension/quinn@2moresym.org/schemas/org.quinn.gschema.xml — shortcut setting
+systemd/quinn.service — user service
+install.sh — install/build/model bootstrap
+.github/workflows/ci.yml — Rust CI
+README.md — project docs/roadmap
+Ai Mem.txt — THIS CROSS-CHAT MEMORY FILE
+
+WHEN CONTINUING THIS PROJECT
+- Read this file first.
+- Inspect main before coding; do not assume later tasks were completed.
+- Update this file whenever stages/tasks/status change.
+- Prefer small, runnable, testable increments.
+- After meaningful changes, run/inspect CI and update the current state here.
