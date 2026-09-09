@@ -2,7 +2,7 @@ QUINN — AI HANDOFF MEMORY
 Updated: 2026-09-09
 Repo: 2moresym/Quinn
 Branch: main
-Current HEAD: 10ad1b57a589cbbf376e926dc73863e2cdea0ff0
+Current HEAD: d6457adf978276afbef1c6c7a7b976b08c127627
 Project: Quinn, a local-only GNOME AI command assistant.
 
 ARCHITECTURE
@@ -25,7 +25,7 @@ MODEL
 - Override with QUINN_MODEL.
 - Model runtime is pure Rust; no Python runtime dependency after model download.
 
-DONE — STAGE 1 FOUNDATION
+STAGE 1 — FOUNDATION
 [x] Cargo workspace
 [x] quinn-daemon crate
 [x] Load Needle v2 once at daemon startup
@@ -34,12 +34,16 @@ DONE — STAGE 1 FOUNDATION
 [x] open_application
 [x] open_terminal
 [x] set_volume
+[x] set_brightness
 [x] deterministic multi-command splitting: and / then / + / comma
 [x] confidence gate at 0.70
 [x] CI workflow added
-[ ] CI result verified — no completed workflow/status is visible yet
+[ ] Latest CI verified green
+  - Run #7 on 3da2c... failed only at cargo fmt.
+  - Run #8 on 4d5b... was observed in progress.
+  - Latest code after that: d6457a... (tool formatting fix); a new run should appear.
 
-DONE — STAGE 2 GNOME BASE (CODE SCAFFOLD)
+STAGE 2 — GNOME BASE / SCAFFOLD
 [x] Extension metadata targeting GNOME Shell 45-50
 [x] Modern GNOME Extension base class
 [x] Panel indicator
@@ -51,22 +55,24 @@ DONE — STAGE 2 GNOME BASE (CODE SCAFFOLD)
 [x] systemd --user unit
 [x] install.sh bootstrap
 [ ] Runtime-tested on target GNOME installation
+[ ] Add visible executing state
+[ ] Improve daemon-unavailable/reconnect behavior
 
 NEXT IMMEDIATE TASKS
-1. Verify Rust CI/build on GitHub and fix any compiler/clippy errors.
+1. Verify latest Rust CI/build and fix any compiler/clippy errors.
 2. Run Quinn locally with a real needle2.cact and manually test busctl Ask calls.
 3. Verify the extension loads on the installed GNOME Shell version.
-4. Show live executing state in popup and improve daemon-unavailable handling.
-5. Add prerecorded voice acknowledgements using rodio.
-6. Add set_brightness(percent).
+4. Add visible live execution state to the popup.
+5. Improve D-Bus proxy reconnect/daemon-unavailable handling.
+6. Add prerecorded voice acknowledgements with rodio.
 7. Add search_files(query) safely.
 8. Add create_reminder(text, when).
 
 STAGE 3 — VOICE + ACTIONS
+[x] set_brightness(percent) implementation
 [ ] prerecorded .ogg/.wav acknowledgement clips
 [ ] rodio playback on successful tool execution
 [ ] distinct failure/low-confidence feedback
-[ ] set_brightness(percent)
 [ ] search_files(query)
 [ ] create_reminder(text, when)
 [ ] improve .desktop application resolution
