@@ -9,7 +9,7 @@ pub const TOOL_SCHEMAS: &str = r#"[
 {"name":"open_terminal","description":"Open the user's installed terminal application","parameters":{"type":"object","properties":{},"required":[]}},
 {"name":"set_volume","description":"Set the default audio output volume to an integer percentage from 0 to 100","parameters":{"type":"object","properties":{"percent":{"type":"integer","minimum":0,"maximum":100}},"required":["percent"]}},
 {"name":"set_brightness","description":"Set the display brightness to an integer percentage from 0 to 100","parameters":{"type":"object","properties":{"percent":{"type":"integer","minimum":0,"maximum":100}},"required":["percent"]}},
-{"name":"search_files","description":"Search the user's home directory for files whose names contain a query; returns a small deterministic list of matching paths","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}
+{"name":"search_files","description":"Search the user's home directory for files whose names contain a query; returns up to five deterministic matching paths","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}
 ]"#;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -202,7 +202,7 @@ fn search_files(query: &str) -> Result<String, String> {
         .arg(&home)
         .args(["-maxdepth", "6", "-type", "f", "-iname"])
         .arg(&pattern)
-        .args(["-print", "-quit"])
+        .arg("-print")
         .output()
         .map_err(|e| format!("failed to search files: {e}"))?;
 
@@ -210,12 +210,16 @@ fn search_files(query: &str) -> Result<String, String> {
         return Err("file search failed".to_string());
     }
 
-    let first = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if first.is_empty() {
+    let matches: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .take(5)
+        .map(str::to_owned)
+        .collect();
+    if matches.is_empty() {
         return Ok(format!("no files matching '{query}' were found"));
     }
 
-    Ok(format!("found file: {first}"))
+    Ok(format!("found files: {}", matches.join("; ")))
 }
 
 pub fn event_json(call: &ToolCall, result: &str) -> String {
