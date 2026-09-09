@@ -98,6 +98,9 @@ mod tests {
 
     #[test]
     fn does_not_split_embedded_words() {
-        assert_eq!(split_utterance("open android studio"), vec!["open android studio"]);
+        assert_eq!(
+            split_utterance("open android studio"),
+            vec!["open android studio"]
+        );
     }
 }
