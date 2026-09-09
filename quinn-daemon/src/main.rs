@@ -30,7 +30,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let apps = Arc::new(apps::AppCatalog::discover());
     let classifier = Arc::new(app_classifier::AppClassifier::discover());
-    info!(count = apps.len(), classified = classifier.len(), "discovered installed applications");
+    info!(
+        count = apps.len(),
+        classified = classifier.len(),
+        "discovered installed applications"
+    );
 
     let voice = match voice::VoiceEngine::new() {
         Ok(voice) => {
