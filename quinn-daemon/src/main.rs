@@ -1,3 +1,4 @@
+mod app_classifier;
 mod apps;
 mod commands;
 mod service;
@@ -28,7 +29,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Needle v2 ready");
 
     let apps = Arc::new(apps::AppCatalog::discover());
-    info!(count = apps.len(), "discovered installed applications");
+    let classifier = Arc::new(app_classifier::AppClassifier::discover());
+    info!(count = apps.len(), classified = classifier.len(), "discovered installed applications");
 
     let voice = match voice::VoiceEngine::new() {
         Ok(voice) => {
@@ -41,7 +43,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let daemon = service::QuinnDaemon::new(engine, apps, voice);
+    let daemon = service::QuinnDaemon::new(engine, apps, classifier, voice);
     let _connection = connection::Builder::session()?
         .name("org.quinn.Assistant")?
         .serve_at("/org/quinn/Assistant", daemon)?
