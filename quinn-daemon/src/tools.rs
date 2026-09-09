@@ -21,8 +21,7 @@ pub struct ToolCall {
 }
 
 pub fn parse_tool_call(raw: &str) -> Result<ToolCall, String> {
-    let value: Value =
-        serde_json::from_str(raw).map_err(|e| format!("invalid tool JSON: {e}"))?;
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("invalid tool JSON: {e}"))?;
     match value {
         Value::Object(_) => {
             serde_json::from_value(value).map_err(|e| format!("invalid tool call: {e}"))
@@ -31,9 +30,7 @@ pub fn parse_tool_call(raw: &str) -> Result<ToolCall, String> {
             .into_iter()
             .next()
             .ok_or_else(|| "empty tool call array".to_string())
-            .and_then(|v| {
-                serde_json::from_value(v).map_err(|e| format!("invalid tool call: {e}"))
-            }),
+            .and_then(|v| serde_json::from_value(v).map_err(|e| format!("invalid tool call: {e}"))),
         _ => Err("tool call must be an object or array".to_string()),
     }
 }
@@ -151,7 +148,8 @@ fn scan_desktop_dir(dir: &Path, requested: &str, best: &mut Option<(u8, PathBuf)
             0
         } else if name_match {
             1
-        } else if stem_norm.replace('-', " ").contains(requested) || requested.contains(&stem_norm) {
+        } else if stem_norm.replace('-', " ").contains(requested) || requested.contains(&stem_norm)
+        {
             2
         } else {
             continue;
