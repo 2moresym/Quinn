@@ -12,6 +12,7 @@ ARCHITECTURE
 - Object path: /org/quinn/Assistant
 - Interface: org.quinn.Assistant
 - Ask(query: string) -> (response: string, tool_calls: JSON string)
+- Listen() -> text transcript; transcript goes through the same Ask/query pipeline as typed input.
 - Signal: ToolExecuted(name, args, result)
 - Property: Ready: bool
 
@@ -29,9 +30,26 @@ APP GROUNDING
 - quinn-daemon/src/apps.rs discovers visible .desktop files from user/system application directories at startup.
 - AppCatalog stores desktop ID, display name, GenericName, aliases, and source path.
 - Resolution prefers exact alias, then prefix/substring matches.
-- open_application now resolves the model's requested app through AppCatalog and launches the canonical desktop ID via gtk-launch.
-- This deliberately prevents the 45M model from needing to memorize the user's installed application set.
-- Future improvement: add stronger fuzzy scoring/ambiguity handling and refresh the catalog when applications change.
+- open_application resolves the model's requested app through AppCatalog and launches the canonical desktop ID via gtk-launch.
+- quinn-daemon/src/app_classifier.rs classifies app type from desktop metadata/capabilities.
+- Signals currently considered: GenericName, Categories, Keywords, MimeType, and URL/MIME handlers.
+- Browser classification recognizes WebBrowser category, http/https handlers, and text/html support, so a browser such as Helium can be identified from its installed desktop metadata instead of being hardcoded.
+- Generic type resolution supports browser, chat, editor, terminal, file manager, media player, image viewer, game, development, and office.
+- If a generic type has multiple candidates, the current tool path refuses to silently choose and returns the candidates.
+- Future: persist user preferences (for example preferred browser), refresh the catalog when apps change, and improve fuzzy scoring/localized desktop fields.
+
+VOICE
+- quinn-daemon/src/voice.rs now provides the first optional offline voice backend.
+- Feature flag: cargo build -p quinn-daemon --features voice
+- STT candidate selected for first implementation: Rust `vosk` 0.3.1.
+- Microphone capture uses CPAL 0.15, converts channels to mono, resamples to 16 kHz, then sends PCM i16 to Vosk.
+- Default Vosk model path: ~/.local/share/quinn/voice-model
+- Override model path with QUINN_STT_MODEL.
+- D-Bus Listen() captures a short utterance and returns text.
+- GNOME popup has a microphone button that calls Listen(), inserts the transcript into the text field, and then calls Ask().
+- Default build keeps voice optional so normal CI/text builds do not require libvosk.
+- Voice is NOT yet runtime-tested on the target machine.
+- Future: push-to-talk/toggle recording, VAD/silence stopping, model bootstrap, live recording UI, and acknowledgment sounds.
 
 STAGE 1 — FOUNDATION
 [x] Cargo workspace
@@ -48,7 +66,7 @@ STAGE 1 — FOUNDATION
 [x] CI workflow added
 [x] cargo fmt passes
 [x] cargo check passes
-[ ] clippy fully green after app-catalog change
+[ ] clippy fully green after latest changes
 
 STAGE 2 — GNOME BASE / SCAFFOLD
 [x] Extension metadata targeting GNOME Shell 45-50
@@ -61,39 +79,31 @@ STAGE 2 — GNOME BASE / SCAFFOLD
 [x] GSettings schema
 [x] systemd --user unit
 [x] install.sh bootstrap
+[x] Voice button UI
 [ ] Runtime-tested on target GNOME installation
-[ ] Add visible executing state
+[ ] Add visible executing/listening states
 [ ] Improve daemon-unavailable/reconnect behavior
 
-STAGE 3 — TEXT + VOICE INPUT / FEEDBACK
-[x] Text input path through GNOME popup -> D-Bus -> shared command pipeline
-[ ] Microphone capture backend
-[ ] Offline speech-to-text backend
-[ ] Voice text feeds the exact same Ask/query pipeline as typed text
-[ ] Push-to-talk / toggle recording UI
-[ ] Stop recording on silence or explicit toggle
+STAGE 3 — TEXT + VOICE + APP INTELLIGENCE
+[x] Text input path
+[x] AppCatalog discovery
+[x] AppClassifier capability/type classification
+[x] Metadata-based browser detection
+[x] Generic app-type resolution
+[x] Optional Vosk STT backend
+[x] CPAL microphone capture
+[x] Local mono/16 kHz conversion
+[x] D-Bus Listen() method
+[x] Voice button -> Listen -> Ask pipeline
+[ ] Build/test voice feature with libvosk + model on target machine
+[ ] Add offline Vosk model download/bootstrap
+[ ] Push-to-talk / silence detection
 [ ] Prerecorded .ogg/.wav acknowledgement clips
 [ ] rodio playback on successful tool execution
 [ ] Distinct failure/low-confidence voice feedback
-
-VOICE DESIGN
-- Prefer a lightweight offline STT backend suitable for low-end CPUs.
-- Current research: the Rust `vosk` crate is available and exposes streaming recognizer APIs; this is a candidate for the first implementation.
-- `whisper.cpp` also supports Linux CPU inference, but its current README lists roughly 75 MiB disk / ~273 MB RAM for tiny and 142 MiB / ~388 MB RAM for base, so it should not be the default on constrained hardware without benchmarking.
-- Keep STT model loading separate from Needle so voice can be optional and memory can be released when not recording.
-- Voice input must never bypass the same confidence gate and tool validation used by typed input.
-
-NEXT IMMEDIATE TASKS
-1. Fix remaining clippy lint(s) after AppCatalog integration.
-2. Verify the latest CI run is green.
-3. Run Quinn locally with a real needle2.cact and manually test busctl Ask calls.
-4. Verify the GNOME extension loads on the installed GNOME Shell version.
-5. Add visible live execution state and D-Bus reconnect behavior.
-6. Implement microphone capture + offline STT behind a voice module.
-7. Feed transcribed text into the exact same request path as typed text.
-8. Add rodio-backed acknowledgement sounds.
-9. Improve app matching with ambiguity detection and refresh support.
-10. Add search_files(query) safely and create_reminder(text, when).
+[ ] search_files(query)
+[ ] create_reminder(text, when)
+[ ] better desktop localization/metadata parsing
 
 STAGE 4 — PERFORMANCE / RELIABILITY
 [ ] cold/warm inference benchmarks
@@ -121,19 +131,22 @@ IMPORTANT DESIGN RULES
 - Keep GNOME extension thin; Rust owns inference/tools/voice.
 - One utterance should normally become one tool call; split obvious multi-command input first.
 - Never blindly execute low-confidence tool calls.
-- Machine-specific entities (apps, devices, files) should be grounded by local deterministic backends, not guessed from model memory.
-- Do not turn Quinn into a general chat app unless a second local model is explicitly added.
+- Machine-specific entities should be grounded by local deterministic backends, not guessed from model memory.
+- Do not hardcode individual applications when installed metadata/capabilities can establish their type.
+- Do not silently choose between multiple apps for a generic type without a stored preference.
 
 CURRENT FILE MAP
 Cargo.toml — workspace
-quinn-daemon/Cargo.toml — daemon dependencies
-quinn-daemon/src/main.rs — model + AppCatalog startup
+quinn-daemon/Cargo.toml — daemon dependencies/features
+quinn-daemon/src/main.rs — model + app + voice startup
 quinn-daemon/src/service.rs — D-Bus interface + request orchestration
 quinn-daemon/src/apps.rs — installed application discovery/resolution
+quinn-daemon/src/app_classifier.rs — metadata/capability classification
 quinn-daemon/src/tools.rs — schemas, parsing, local tools
 quinn-daemon/src/commands.rs — multi-command splitter + tests
+quinn-daemon/src/voice.rs — optional CPAL + Vosk speech-to-text
 extension/quinn@2moresym.org/metadata.json — extension metadata
-extension/quinn@2moresym.org/extension.js — GNOME UI/client
+extension/quinn@2moresym.org/extension.js — GNOME UI/client + voice button
 extension/quinn@2moresym.org/stylesheet.css — popup styling
 extension/quinn@2moresym.org/schemas/org.quinn.gschema.xml — shortcut setting
 systemd/quinn.service — user service
