@@ -2,11 +2,12 @@ mod apps;
 mod commands;
 mod service;
 mod tools;
+mod voice;
 
 use std::{env, error::Error, path::PathBuf, sync::Arc};
 
 use needle_infer::v2_engine::V2Engine;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use zbus::connection;
 
@@ -29,7 +30,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let apps = Arc::new(apps::AppCatalog::discover());
     info!(count = apps.len(), "discovered installed applications");
 
-    let daemon = service::QuinnDaemon::new(engine, apps);
+    let voice = match voice::VoiceEngine::new() {
+        Ok(voice) => {
+            info!("voice backend ready");
+            Some(Arc::new(voice))
+        }
+        Err(error) => {
+            warn!(%error, "voice backend unavailable; text commands remain enabled");
+            None
+        }
+    };
+
+    let daemon = service::QuinnDaemon::new(engine, apps, voice);
     let _connection = connection::Builder::session()?
         .name("org.quinn.Assistant")?
         .serve_at("/org/quinn/Assistant", daemon)?
