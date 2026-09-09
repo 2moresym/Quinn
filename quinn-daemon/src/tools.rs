@@ -117,7 +117,11 @@ fn open_application(
             .arg(&classified.id)
             .spawn()
             .map_err(|e| format!("failed to launch {}: {e}", classified.name))?;
-        return Ok(format!("opened {} ({})", classified.name, classified.app_type.as_str()));
+        return Ok(format!(
+            "opened {} ({})",
+            classified.name,
+            classified.app_type.as_str()
+        ));
     }
 
     let app = apps.resolve(requested).ok_or_else(|| {
@@ -194,8 +198,7 @@ fn search_files(query: &str) -> Result<String, String> {
         return Err("file search query is too long".to_string());
     }
 
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| "HOME is not set".to_string())?;
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
 
     let pattern = format!("*{query}*");
     let output = Command::new("find")

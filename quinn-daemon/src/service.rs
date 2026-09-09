@@ -140,7 +140,9 @@ impl QuinnDaemon {
     #[zbus(out_args("text"))]
     async fn listen(&self) -> fdo::Result<String> {
         let Some(voice) = self.voice.clone() else {
-            return Err(fdo::Error::Failed("voice backend is unavailable".to_string()));
+            return Err(fdo::Error::Failed(
+                "voice backend is unavailable".to_string(),
+            ));
         };
 
         tokio::task::spawn_blocking(move || voice.listen())

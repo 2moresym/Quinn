@@ -143,7 +143,11 @@ fn desktop_field(contents: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     contents
         .lines()
-        .find_map(|line| line.strip_prefix(&prefix).map(str::trim).filter(|v| !v.is_empty()))
+        .find_map(|line| {
+            line.strip_prefix(&prefix)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+        })
         .map(str::to_string)
 }
 
@@ -188,7 +192,11 @@ mod tests {
 
     #[test]
     fn exact_alias_beats_substring() {
-        let vscode = app("Visual Studio Code", "code", &["visual studio code", "code"]);
+        let vscode = app(
+            "Visual Studio Code",
+            "code",
+            &["visual studio code", "code"],
+        );
         assert_eq!(score_match("code", &vscode), Some(0));
     }
 

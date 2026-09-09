@@ -109,7 +109,13 @@ impl AppClassifier {
             let categories = list_field(&contents, "Categories");
             let keywords = list_field(&contents, "Keywords");
             let mime_types = list_field(&contents, "MimeType");
-            let app_type = classify(&name, generic.as_deref(), &categories, &keywords, &mime_types);
+            let app_type = classify(
+                &name,
+                generic.as_deref(),
+                &categories,
+                &keywords,
+                &mime_types,
+            );
             let capabilities = capabilities(&categories, &mime_types);
 
             self.apps.push(ClassifiedApp {
@@ -198,17 +204,27 @@ fn capabilities(categories: &[String], mime_types: &[String]) -> Vec<String> {
             out.push(value.to_string());
         }
     };
-    if mime_types.iter().any(|v| v.eq_ignore_ascii_case("text/html")) {
+    if mime_types
+        .iter()
+        .any(|v| v.eq_ignore_ascii_case("text/html"))
+    {
         add(&mut out, "html");
     }
-    if mime_types.iter().any(|v| v.eq_ignore_ascii_case("x-scheme-handler/http"))
-        || mime_types.iter().any(|v| v.eq_ignore_ascii_case("x-scheme-handler/https"))
+    if mime_types
+        .iter()
+        .any(|v| v.eq_ignore_ascii_case("x-scheme-handler/http"))
+        || mime_types
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case("x-scheme-handler/https"))
     {
         add(&mut out, "web");
         add(&mut out, "http");
         add(&mut out, "https");
     }
-    if mime_types.iter().any(|v| v.eq_ignore_ascii_case("inode/directory")) {
+    if mime_types
+        .iter()
+        .any(|v| v.eq_ignore_ascii_case("inode/directory"))
+    {
         add(&mut out, "directories");
     }
     if mime_types.iter().any(|v| v.starts_with("audio/")) {
@@ -246,7 +262,11 @@ fn field(contents: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     contents
         .lines()
-        .find_map(|line| line.strip_prefix(&prefix).map(str::trim).filter(|v| !v.is_empty()))
+        .find_map(|line| {
+            line.strip_prefix(&prefix)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+        })
         .map(str::to_string)
 }
 
