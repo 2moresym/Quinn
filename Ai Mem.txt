@@ -2,13 +2,12 @@ QUINN — AI HANDOFF MEMORY
 Updated: 2026-09-09
 Repo: 2moresym/Quinn
 Branch: main
-Current HEAD: d6457adf978276afbef1c6c7a7b976b08c127627
 Project: Quinn, a local-only GNOME AI command assistant.
 
 ARCHITECTURE
 - GNOME Shell extension is GJS/JS only.
-- Rust quinn-daemon owns Needle inference and tool execution.
-- UI talks to daemon over session D-Bus.
+- Rust quinn-daemon owns Needle inference, app grounding, voice backend, and tool execution.
+- UI talks to daemon over the session D-Bus.
 - D-Bus name: org.quinn.Assistant
 - Object path: /org/quinn/Assistant
 - Interface: org.quinn.Assistant
@@ -17,13 +16,22 @@ ARCHITECTURE
 - Property: Ready: bool
 
 MODEL
-- Use Needle v2, NOT the old v1-only loading plan.
+- Use Needle v2, not the old v1-only plan.
 - Current needle-rs release verified: v0.2.1.
 - Rust API: needle_infer::v2_engine::V2Engine.
 - Model file: Cactus-Compute/needle2/needle2.cact (~13.7 MB).
 - Default local path: ~/.local/share/quinn/weights/needle2.cact
 - Override with QUINN_MODEL.
 - Model runtime is pure Rust; no Python runtime dependency after model download.
+- Needle should route intent/tool calls; deterministic local backends should resolve machine-specific entities.
+
+APP GROUNDING
+- quinn-daemon/src/apps.rs discovers visible .desktop files from user/system application directories at startup.
+- AppCatalog stores desktop ID, display name, GenericName, aliases, and source path.
+- Resolution prefers exact alias, then prefix/substring matches.
+- open_application now resolves the model's requested app through AppCatalog and launches the canonical desktop ID via gtk-launch.
+- This deliberately prevents the 45M model from needing to memorize the user's installed application set.
+- Future improvement: add stronger fuzzy scoring/ambiguity handling and refresh the catalog when applications change.
 
 STAGE 1 — FOUNDATION
 [x] Cargo workspace
@@ -38,10 +46,9 @@ STAGE 1 — FOUNDATION
 [x] deterministic multi-command splitting: and / then / + / comma
 [x] confidence gate at 0.70
 [x] CI workflow added
-[ ] Latest CI verified green
-  - Run #7 on 3da2c... failed only at cargo fmt.
-  - Run #8 on 4d5b... was observed in progress.
-  - Latest code after that: d6457a... (tool formatting fix); a new run should appear.
+[x] cargo fmt passes
+[x] cargo check passes
+[ ] clippy fully green after app-catalog change
 
 STAGE 2 — GNOME BASE / SCAFFOLD
 [x] Extension metadata targeting GNOME Shell 45-50
@@ -58,41 +65,52 @@ STAGE 2 — GNOME BASE / SCAFFOLD
 [ ] Add visible executing state
 [ ] Improve daemon-unavailable/reconnect behavior
 
-NEXT IMMEDIATE TASKS
-1. Verify latest Rust CI/build and fix any compiler/clippy errors.
-2. Run Quinn locally with a real needle2.cact and manually test busctl Ask calls.
-3. Verify the extension loads on the installed GNOME Shell version.
-4. Add visible live execution state to the popup.
-5. Improve D-Bus proxy reconnect/daemon-unavailable handling.
-6. Add prerecorded voice acknowledgements with rodio.
-7. Add search_files(query) safely.
-8. Add create_reminder(text, when).
-
-STAGE 3 — VOICE + ACTIONS
-[x] set_brightness(percent) implementation
-[ ] prerecorded .ogg/.wav acknowledgement clips
+STAGE 3 — TEXT + VOICE INPUT / FEEDBACK
+[x] Text input path through GNOME popup -> D-Bus -> shared command pipeline
+[ ] Microphone capture backend
+[ ] Offline speech-to-text backend
+[ ] Voice text feeds the exact same Ask/query pipeline as typed text
+[ ] Push-to-talk / toggle recording UI
+[ ] Stop recording on silence or explicit toggle
+[ ] Prerecorded .ogg/.wav acknowledgement clips
 [ ] rodio playback on successful tool execution
-[ ] distinct failure/low-confidence feedback
-[ ] search_files(query)
-[ ] create_reminder(text, when)
-[ ] improve .desktop application resolution
+[ ] Distinct failure/low-confidence voice feedback
 
-STAGE 4 — PERFORMANCE + RELIABILITY
+VOICE DESIGN
+- Prefer a lightweight offline STT backend suitable for low-end CPUs.
+- Current research: the Rust `vosk` crate is available and exposes streaming recognizer APIs; this is a candidate for the first implementation.
+- `whisper.cpp` also supports Linux CPU inference, but its current README lists roughly 75 MiB disk / ~273 MB RAM for tiny and 142 MiB / ~388 MB RAM for base, so it should not be the default on constrained hardware without benchmarking.
+- Keep STT model loading separate from Needle so voice can be optional and memory can be released when not recording.
+- Voice input must never bypass the same confidence gate and tool validation used by typed input.
+
+NEXT IMMEDIATE TASKS
+1. Fix remaining clippy lint(s) after AppCatalog integration.
+2. Verify the latest CI run is green.
+3. Run Quinn locally with a real needle2.cact and manually test busctl Ask calls.
+4. Verify the GNOME extension loads on the installed GNOME Shell version.
+5. Add visible live execution state and D-Bus reconnect behavior.
+6. Implement microphone capture + offline STT behind a voice module.
+7. Feed transcribed text into the exact same request path as typed text.
+8. Add rodio-backed acknowledgement sounds.
+9. Improve app matching with ambiguity detection and refresh support.
+10. Add search_files(query) safely and create_reminder(text, when).
+
+STAGE 4 — PERFORMANCE / RELIABILITY
 [ ] cold/warm inference benchmarks
-[ ] reuse V2 inference state where safe
-[ ] reduce confidence-gate memory churn (v2 confidence head can need a full causal cache)
-[ ] integration tests for D-Bus
-[ ] tool execution tests
+[ ] benchmark STT choices on low-end CPU
+[ ] reuse inference state where safe
+[ ] reduce confidence-gate memory churn
+[ ] integration tests for D-Bus and tool execution
 [ ] structured diagnostics/logging
 [ ] startup/restart testing under systemd --user
 
 STAGE 5 — OPTIONAL CHAT
-[ ] Decide whether to add a second local conversational model.
+[ ] Decide whether Quinn needs a second local conversational model.
 [ ] Keep Needle focused on routing/tool calls.
-[ ] Keep command-only mode as the low-resource default.
+[ ] Preserve command-only mode as the low-resource default.
 
 STAGE 6 — PACKAGING
-[ ] verify exact supported GNOME Shell range
+[ ] finalize exact supported GNOME Shell range
 [ ] Debian/GNOME packaging
 [ ] uninstall script
 [ ] release artifacts
@@ -100,16 +118,18 @@ STAGE 6 — PACKAGING
 IMPORTANT DESIGN RULES
 - Local-only: no cloud/API calls.
 - No Python at runtime.
-- Keep GNOME extension thin; Rust owns inference/tools.
-- Needle v2 normally maps one utterance to one call; split multi-command input before inference.
+- Keep GNOME extension thin; Rust owns inference/tools/voice.
+- One utterance should normally become one tool call; split obvious multi-command input first.
 - Never blindly execute low-confidence tool calls.
+- Machine-specific entities (apps, devices, files) should be grounded by local deterministic backends, not guessed from model memory.
 - Do not turn Quinn into a general chat app unless a second local model is explicitly added.
 
 CURRENT FILE MAP
 Cargo.toml — workspace
 quinn-daemon/Cargo.toml — daemon dependencies
-quinn-daemon/src/main.rs — model/service startup
+quinn-daemon/src/main.rs — model + AppCatalog startup
 quinn-daemon/src/service.rs — D-Bus interface + request orchestration
+quinn-daemon/src/apps.rs — installed application discovery/resolution
 quinn-daemon/src/tools.rs — schemas, parsing, local tools
 quinn-daemon/src/commands.rs — multi-command splitter + tests
 extension/quinn@2moresym.org/metadata.json — extension metadata
@@ -120,7 +140,7 @@ systemd/quinn.service — user service
 install.sh — install/build/model bootstrap
 .github/workflows/ci.yml — Rust CI
 README.md — project docs/roadmap
-Ai Mem.txt — THIS CROSS-CHAT MEMORY FILE
+Ai Mem.txt — cross-chat project handoff/state
 
 CONTINUATION RULE
 - Read this file first.
