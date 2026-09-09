@@ -42,6 +42,8 @@ fn model_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     home.join(DEFAULT_MODEL_RELATIVE)
 }
