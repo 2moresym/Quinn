@@ -1,3 +1,4 @@
+mod apps;
 mod commands;
 mod service;
 mod tools;
@@ -25,7 +26,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let engine = Arc::new(V2Engine::load(&model_path)?);
     info!("Needle v2 ready");
 
-    let daemon = service::QuinnDaemon::new(engine);
+    let apps = Arc::new(apps::AppCatalog::discover());
+    info!(count = apps.len(), "discovered installed applications");
+
+    let daemon = service::QuinnDaemon::new(engine, apps);
     let _connection = connection::Builder::session()?
         .name("org.quinn.Assistant")?
         .serve_at("/org/quinn/Assistant", daemon)?
