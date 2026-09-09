@@ -38,12 +38,12 @@ pub fn split_utterance(input: &str) -> Vec<String> {
 
         if ch.is_whitespace() {
             let rest = &input[i..];
-            let lower = rest.to_ascii_lowercase();
             for word in ["and", "then"] {
-                let marker = format!(" {word} ");
-                if lower.starts_with(&marker) {
+                let marker = format!("{word} ");
+                let padded = format!(" {marker}");
+                if rest.to_ascii_lowercase().starts_with(&padded) {
                     push_fragment(&mut out, &mut current);
-                    i += marker.len();
+                    i += padded.len();
                     while i < bytes.len() {
                         let next = input[i..].chars().next().unwrap();
                         if !next.is_whitespace() {
@@ -51,6 +51,8 @@ pub fn split_utterance(input: &str) -> Vec<String> {
                         }
                         i += next.len_utf8();
                     }
+                    current.clear();
+                    goto_next_non_separator(&mut i, bytes, input);
                     continue;
                 }
             }
@@ -65,6 +67,16 @@ pub fn split_utterance(input: &str) -> Vec<String> {
         vec![input.trim().to_string()]
     } else {
         out
+    }
+}
+
+fn goto_next_non_separator(i: &mut usize, bytes: &[u8], input: &str) {
+    while *i < bytes.len() {
+        let ch = input[*i..].chars().next().unwrap();
+        if !ch.is_whitespace() {
+            break;
+        }
+        *i += ch.len_utf8();
     }
 }
 
