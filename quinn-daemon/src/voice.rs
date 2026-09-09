@@ -34,7 +34,10 @@ impl VoiceEngine {
 
         #[cfg(not(feature = "voice"))]
         {
-            Err("voice support is not compiled; rebuild quinn-daemon with --features voice".to_string())
+            Err(
+                "voice support is not compiled; rebuild quinn-daemon with --features voice"
+                    .to_string(),
+            )
         }
     }
 
