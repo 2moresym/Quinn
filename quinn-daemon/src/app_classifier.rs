@@ -62,32 +62,20 @@ impl AppClassifier {
 
     pub fn resolve_type(&self, requested: &str) -> Option<&ClassifiedApp> {
         let requested = normalize(requested);
-        let kind = match requested.as_str() {
-            "browser" | "web browser" | "webbrowser" => AppType::Browser,
-            "chat" | "messenger" | "messaging" => AppType::Chat,
-            "editor" | "text editor" => AppType::Editor,
-            "terminal" | "terminal emulator" => AppType::Terminal,
-            "file manager" | "filemanager" => AppType::FileManager,
-            "media player" | "media" => AppType::MediaPlayer,
-            "image viewer" | "photo viewer" => AppType::ImageViewer,
-            "game" => AppType::Game,
-            "development" | "developer tools" | "ide" | "code editor" => AppType::Development,
-            "office" => AppType::Office,
-            _ => return None,
-        };
+        let kind = parse_type(&requested)?;
         self.apps.iter().find(|app| app.app_type == kind)
     }
 
-    pub fn candidates(&self, requested: &str, limit: usize) -> Vec<&ClassifiedApp> {
+    pub fn type_candidates(&self, requested: &str, limit: usize) -> Vec<&ClassifiedApp> {
         let requested = normalize(requested);
-        let mut matches: Vec<_> = self
-            .apps
+        let Some(kind) = parse_type(&requested) else {
+            return Vec::new();
+        };
+        self.apps
             .iter()
-            .filter(|app| normalize(&app.name).contains(&requested))
-            .collect();
-        matches.sort_by(|a, b| a.name.cmp(&b.name));
-        matches.truncate(limit);
-        matches
+            .filter(|app| app.app_type == kind)
+            .take(limit)
+            .collect()
     }
 
     fn scan_dir(&mut self, dir: &PathBuf) {
@@ -102,13 +90,19 @@ impl AppClassifier {
             let Ok(contents) = fs::read_to_string(&path) else {
                 continue;
             };
-            if hidden_or_nodisplay(&contents) || field(&contents, "Type").as_deref() != Some("Application") {
+            if hidden_or_nodisplay(&contents)
+                || field(&contents, "Type").as_deref() != Some("Application")
+            {
                 continue;
             }
             let Some(name) = field(&contents, "Name") else {
                 continue;
             };
-            let Some(id) = path.file_stem().and_then(|v| v.to_str()).map(str::to_string) else {
+            let Some(id) = path
+                .file_stem()
+                .and_then(|v| v.to_str())
+                .map(str::to_string)
+            else {
                 continue;
             };
             let generic = field(&contents, "GenericName");
@@ -116,7 +110,7 @@ impl AppClassifier {
             let keywords = list_field(&contents, "Keywords");
             let mime_types = list_field(&contents, "MimeType");
             let app_type = classify(&name, generic.as_deref(), &categories, &keywords, &mime_types);
-            let capabilities = capabilities(&categories, &keywords, &mime_types);
+            let capabilities = capabilities(&categories, &mime_types);
 
             self.apps.push(ClassifiedApp {
                 id,
@@ -140,7 +134,13 @@ fn application_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-fn classify(name: &str, generic: Option<&str>, categories: &[String], keywords: &[String], mime_types: &[String]) -> AppType {
+fn classify(
+    name: &str,
+    generic: Option<&str>,
+    categories: &[String],
+    keywords: &[String],
+    mime_types: &[String],
+) -> AppType {
     let haystack = normalize(&format!(
         "{} {} {} {}",
         name,
@@ -173,7 +173,7 @@ fn classify(name: &str, generic: Option<&str>, categories: &[String], keywords: 
     if category("filemanager") || has("file manager") || mime("inode/directory") {
         return AppType::FileManager;
     }
-    if category("audiovideo") || has("media player") || has("media") {
+    if category("audiovideo") || has("media player") {
         return AppType::MediaPlayer;
     }
     if category("graphics") || has("image viewer") || has("photo viewer") {
@@ -191,7 +191,7 @@ fn classify(name: &str, generic: Option<&str>, categories: &[String], keywords: 
     AppType::Unknown
 }
 
-fn capabilities(categories: &[String], keywords: &[String], mime_types: &[String]) -> Vec<String> {
+fn capabilities(categories: &[String], mime_types: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let add = |out: &mut Vec<String>, value: &str| {
         if !out.iter().any(|v| v == value) {
@@ -220,10 +220,26 @@ fn capabilities(categories: &[String], keywords: &[String], mime_types: &[String
     if mime_types.iter().any(|v| v.starts_with("image/")) {
         add(&mut out, "images");
     }
-    if categories.iter().any(|v| normalize(v) == "webbrowser") || keywords.iter().any(|v| normalize(v).contains("browser")) {
+    if categories.iter().any(|v| normalize(v) == "webbrowser") {
         add(&mut out, "browser");
     }
     out
+}
+
+fn parse_type(input: &str) -> Option<AppType> {
+    Some(match input {
+        "browser" | "web browser" | "webbrowser" => AppType::Browser,
+        "chat" | "messenger" | "messaging" => AppType::Chat,
+        "editor" | "text editor" => AppType::Editor,
+        "terminal" | "terminal emulator" => AppType::Terminal,
+        "file manager" | "filemanager" => AppType::FileManager,
+        "media player" | "media" => AppType::MediaPlayer,
+        "image viewer" | "photo viewer" => AppType::ImageViewer,
+        "game" => AppType::Game,
+        "development" | "developer tools" | "ide" | "code editor" => AppType::Development,
+        "office" => AppType::Office,
+        _ => return None,
+    })
 }
 
 fn field(contents: &str, key: &str) -> Option<String> {
