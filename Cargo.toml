@@ -1,0 +1,16 @@
+[workspace]
+members = ["quinn-daemon"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/2moresym/Quinn"
+rust-version = "1.87"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
