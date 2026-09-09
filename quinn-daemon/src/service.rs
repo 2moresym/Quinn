@@ -6,6 +6,7 @@ use tracing::{info, warn};
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
 use crate::{
+    apps::AppCatalog,
     commands::split_utterance,
     tools::{self, ToolCall, TOOL_SCHEMAS},
 };
@@ -14,11 +15,12 @@ const CONFIDENCE_THRESHOLD: f32 = 0.70;
 
 pub struct QuinnDaemon {
     engine: Arc<V2Engine>,
+    apps: Arc<AppCatalog>,
 }
 
 impl QuinnDaemon {
-    pub fn new(engine: Arc<V2Engine>) -> Self {
-        Self { engine }
+    pub fn new(engine: Arc<V2Engine>, apps: Arc<AppCatalog>) -> Self {
+        Self { engine, apps }
     }
 
     fn execute_fragment(&self, fragment: &str) -> (String, Option<(ToolCall, String)>) {
@@ -54,7 +56,7 @@ impl QuinnDaemon {
             Err(e) => return (format!("I couldn't understand the tool call: {e}"), None),
         };
 
-        match tools::execute(&call) {
+        match tools::execute(&call, &self.apps) {
             Ok(message) => ("Done.".to_string(), Some((call, message))),
             Err(message) => (
                 format!("I couldn't complete that: {message}"),
@@ -109,7 +111,7 @@ impl QuinnDaemon {
             responses.join(" ")
         };
         let tool_calls = json!(executed).to_string();
-        info!(query, "handled request");
+        info!(query, app_count = self.apps.len(), "handled request");
         Ok((response, tool_calls))
     }
 
