@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.quinn" path="/org/quinn/">
-    <key name="toggle-quinn" type="s">
-      <default>"&lt;Super&gt;space"</default>
+    <key name="toggle-quinn" type="as">
+      <default>["&lt;Super&gt;space"]</default>
       <summary>Toggle Quinn</summary>
       <description>Global shortcut used to open the Quinn command popup.</description>
     </key>
