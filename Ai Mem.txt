@@ -2,6 +2,7 @@ QUINN — AI HANDOFF MEMORY
 Updated: 2026-09-09
 Repo: 2moresym/Quinn
 Branch: main
+Current HEAD: 10ad1b57a589cbbf376e926dc73863e2cdea0ff0
 Project: Quinn, a local-only GNOME AI command assistant.
 
 ARCHITECTURE
@@ -22,7 +23,7 @@ MODEL
 - Model file: Cactus-Compute/needle2/needle2.cact (~13.7 MB).
 - Default local path: ~/.local/share/quinn/weights/needle2.cact
 - Override with QUINN_MODEL.
-- Model runtime is pure Rust; no Python runtime dependency.
+- Model runtime is pure Rust; no Python runtime dependency after model download.
 
 DONE — STAGE 1 FOUNDATION
 [x] Cargo workspace
@@ -35,9 +36,10 @@ DONE — STAGE 1 FOUNDATION
 [x] set_volume
 [x] deterministic multi-command splitting: and / then / + / comma
 [x] confidence gate at 0.70
-[x] Rust CI: fmt/check/clippy
+[x] CI workflow added
+[ ] CI result verified — no completed workflow/status is visible yet
 
-DONE — STAGE 2 GNOME BASE
+DONE — STAGE 2 GNOME BASE (CODE SCAFFOLD)
 [x] Extension metadata targeting GNOME Shell 45-50
 [x] Modern GNOME Extension base class
 [x] Panel indicator
@@ -48,15 +50,17 @@ DONE — STAGE 2 GNOME BASE
 [x] GSettings schema
 [x] systemd --user unit
 [x] install.sh bootstrap
+[ ] Runtime-tested on target GNOME installation
 
 NEXT IMMEDIATE TASKS
 1. Verify Rust CI/build on GitHub and fix any compiler/clippy errors.
-2. Fix/verify extension behavior on the actual installed GNOME Shell version.
-3. Show live executing state in popup and better daemon-unavailable handling.
-4. Add prerecorded voice acknowledgements using rodio.
-5. Add set_brightness(percent).
-6. Add search_files(query) safely.
-7. Add create_reminder(text, when).
+2. Run Quinn locally with a real needle2.cact and manually test busctl Ask calls.
+3. Verify the extension loads on the installed GNOME Shell version.
+4. Show live executing state in popup and improve daemon-unavailable handling.
+5. Add prerecorded voice acknowledgements using rodio.
+6. Add set_brightness(percent).
+7. Add search_files(query) safely.
+8. Add create_reminder(text, when).
 
 STAGE 3 — VOICE + ACTIONS
 [ ] prerecorded .ogg/.wav acknowledgement clips
@@ -112,7 +116,7 @@ install.sh — install/build/model bootstrap
 README.md — project docs/roadmap
 Ai Mem.txt — THIS CROSS-CHAT MEMORY FILE
 
-WHEN CONTINUING THIS PROJECT
+CONTINUATION RULE
 - Read this file first.
 - Inspect main before coding; do not assume later tasks were completed.
 - Update this file whenever stages/tasks/status change.
