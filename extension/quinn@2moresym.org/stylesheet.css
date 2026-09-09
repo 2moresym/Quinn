@@ -1,0 +1,10 @@
+.quinn-popup-box {
+    spacing: 6px;
+    min-width: 320px;
+    padding: 8px;
+}
+
+.quinn-status {
+    font-size: 0.9em;
+    opacity: 0.8;
+}
