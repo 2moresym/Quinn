@@ -212,37 +212,38 @@ fn create_app_watcher(
     let callback_classifier = Arc::clone(&classifier);
     let callback_debounce = Arc::clone(&debounce);
 
-    let mut watcher = match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-        let Ok(event) = result else {
-            warn!("application desktop-file watcher reported an error");
-            return;
+    let mut watcher =
+        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            let Ok(event) = result else {
+                warn!("application desktop-file watcher reported an error");
+                return;
+            };
+
+            if !matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+            ) {
+                return;
+            }
+
+            let Ok(mut last_event) = callback_debounce.lock() else {
+                warn!("application watcher debounce lock is poisoned");
+                return;
+            };
+            if last_event.elapsed() < APP_EVENT_DEBOUNCE {
+                return;
+            }
+            *last_event = Instant::now();
+            drop(last_event);
+
+            refresh_app_intelligence(&callback_apps, &callback_classifier);
+        }) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                warn!(%error, "failed to create application desktop-file watcher");
+                return None;
+            }
         };
-
-        if !matches!(
-            event.kind,
-            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-        ) {
-            return;
-        }
-
-        let Ok(mut last_event) = callback_debounce.lock() else {
-            warn!("application watcher debounce lock is poisoned");
-            return;
-        };
-        if last_event.elapsed() < APP_EVENT_DEBOUNCE {
-            return;
-        }
-        *last_event = Instant::now();
-        drop(last_event);
-
-        refresh_app_intelligence(&callback_apps, &callback_classifier);
-    }) {
-        Ok(watcher) => watcher,
-        Err(error) => {
-            warn!(%error, "failed to create application desktop-file watcher");
-            return None;
-        }
-    };
 
     let mut watched = 0usize;
     for path in application_watch_paths() {
@@ -304,10 +305,7 @@ fn refresh_app_intelligence(apps: &RwLock<AppCatalog>, classifier: &RwLock<AppCl
     if old_count != new_count || old_classified != new_classified {
         info!(
             old_count,
-            new_count,
-            old_classified,
-            new_classified,
-            "refreshed application intelligence"
+            new_count, old_classified, new_classified, "refreshed application intelligence"
         );
     }
 }
