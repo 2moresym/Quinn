@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::process::Command;
+use std::{process::Command, sync::RwLock};
 
 use crate::{app_classifier::AppClassifier, apps::AppCatalog};
 
@@ -36,8 +36,8 @@ pub fn parse_tool_call(raw: &str) -> Result<ToolCall, String> {
 
 pub fn execute(
     call: &ToolCall,
-    apps: &AppCatalog,
-    classifier: &AppClassifier,
+    apps: &RwLock<AppCatalog>,
+    classifier: &RwLock<AppClassifier>,
 ) -> Result<String, String> {
     match call.name.as_str() {
         "open_application" => {
@@ -97,11 +97,15 @@ fn open_terminal() -> Result<String, String> {
 
 fn open_application(
     requested: &str,
-    apps: &AppCatalog,
-    classifier: &AppClassifier,
+    apps: &RwLock<AppCatalog>,
+    classifier: &RwLock<AppClassifier>,
 ) -> Result<String, String> {
-    if let Some(classified) = classifier.resolve_type(requested) {
-        let candidates = classifier.type_candidates(requested, 2);
+    let classifier_guard = classifier
+        .read()
+        .map_err(|_| "application classifier lock is poisoned".to_string())?;
+
+    if let Some(classified) = classifier_guard.resolve_type(requested) {
+        let candidates = classifier_guard.type_candidates(requested, 2);
         if candidates.len() > 1 {
             return Err(format!(
                 "multiple {} applications are installed: {}; please name one explicitly",
@@ -124,7 +128,7 @@ fn open_application(
         ));
     }
 
-    if let Some(capability) = classifier.resolve_capability(requested) {
+    if let Some(capability) = classifier_guard.resolve_capability(requested) {
         Command::new("gtk-launch")
             .arg(&capability.id)
             .spawn()
@@ -135,9 +139,13 @@ fn open_application(
             capability.app_type.as_str()
         ));
     }
+    drop(classifier_guard);
 
-    let app = apps.resolve(requested).ok_or_else(|| {
-        let candidates = apps.candidate_names(requested, 3);
+    let apps_guard = apps
+        .read()
+        .map_err(|_| "application catalog lock is poisoned".to_string())?;
+    let app = apps_guard.resolve(requested).ok_or_else(|| {
+        let candidates = apps_guard.candidate_names(requested, 3);
         if candidates.is_empty() {
             format!("could not find installed application '{requested}'")
         } else {
@@ -225,11 +233,12 @@ fn search_files(query: &str) -> Result<String, String> {
         return Err("file search failed".to_string());
     }
 
-    let matches: Vec<String> = String::from_utf8_lossy(&output.stdout)
+    let mut matches: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
-        .take(5)
         .map(str::to_owned)
         .collect();
+    matches.sort_unstable();
+    matches.truncate(5);
     if matches.is_empty() {
         return Ok(format!("no files matching '{query}' were found"));
     }
