@@ -5,7 +5,7 @@ mod service;
 mod tools;
 mod voice;
 
-use std::{env, error::Error, path::PathBuf, sync::Arc};
+use std::{env, error::Error, path::PathBuf, sync::{Arc, RwLock}};
 
 use needle_infer::v2_engine::V2Engine;
 use tracing::{info, warn};
@@ -28,11 +28,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let engine = Arc::new(V2Engine::load(&model_path)?);
     info!("Needle v2 ready");
 
-    let apps = Arc::new(apps::AppCatalog::discover());
-    let classifier = Arc::new(app_classifier::AppClassifier::discover());
+    let apps = Arc::new(RwLock::new(apps::AppCatalog::discover()));
+    let classifier = Arc::new(RwLock::new(app_classifier::AppClassifier::discover()));
+    let app_count = apps.read().map(|catalog| catalog.len()).unwrap_or(0);
+    let classified_count = classifier
+        .read()
+        .map(|classifier| classifier.len())
+        .unwrap_or(0);
     info!(
-        count = apps.len(),
-        classified = classifier.len(),
+        count = app_count,
+        classified = classified_count,
         "discovered installed applications"
     );
 
