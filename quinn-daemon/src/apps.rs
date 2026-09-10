@@ -8,19 +8,7 @@ use std::{
 pub struct AppEntry {
     pub id: String,
     pub name: String,
-    pub generic_name: Option<String>,
     pub aliases: Vec<String>,
-    pub desktop_file: PathBuf,
-}
-
-impl AppEntry {
-    pub fn generic_name(&self) -> Option<&str> {
-        self.generic_name.as_deref()
-    }
-
-    pub fn desktop_file(&self) -> &Path {
-        &self.desktop_file
-    }
 }
 
 #[derive(Debug, Default)]
@@ -99,9 +87,9 @@ impl AppCatalog {
             else {
                 continue;
             };
-            let generic_name = desktop_field(&contents, "GenericName");
+            let generic = desktop_field(&contents, "GenericName");
             let mut aliases = vec![normalize(&id), normalize(&name)];
-            if let Some(generic) = &generic_name {
+            if let Some(generic) = &generic {
                 aliases.push(normalize(generic));
             }
             aliases.retain(|alias| !alias.is_empty());
@@ -111,9 +99,7 @@ impl AppCatalog {
             let entry = AppEntry {
                 id,
                 name,
-                generic_name,
                 aliases: aliases.clone(),
-                desktop_file: path,
             };
             let index = self.apps.len();
             self.apps.push(entry);
@@ -188,15 +174,12 @@ pub fn normalize(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{normalize, score_match, AppEntry};
-    use std::path::PathBuf;
 
     fn app(name: &str, id: &str, aliases: &[&str]) -> AppEntry {
         AppEntry {
             id: id.to_string(),
             name: name.to_string(),
-            generic_name: None,
             aliases: aliases.iter().map(|v| (*v).to_string()).collect(),
-            desktop_file: PathBuf::from(format!("/tmp/{id}.desktop")),
         }
     }
 
