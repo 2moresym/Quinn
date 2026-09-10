@@ -1,7 +1,7 @@
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex, RwLock},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use needle_infer::v2_engine::V2Engine;
@@ -14,18 +14,21 @@ use crate::{
     app_classifier::AppClassifier,
     apps::AppCatalog,
     commands::split_utterance,
+    reminders::{Reminder, ReminderStore},
     tools::{self, ToolCall, TOOL_SCHEMAS},
     voice::VoiceEngine,
 };
 
 const CONFIDENCE_THRESHOLD: f32 = 0.70;
 const APP_EVENT_DEBOUNCE: Duration = Duration::from_millis(250);
+const REMINDER_TOOL_SCHEMA: &str = r#"[{"name":"create_reminder","description":"Create a persistent desktop reminder. Use delay_seconds for when it should fire relative to now.","parameters":{"type":"object","properties":{"text":{"type":"string"},"delay_seconds":{"type":"integer","minimum":1,"maximum":315360000}},"required":["text","delay_seconds"]}}]"#;
 
 pub struct QuinnDaemon {
     engine: Arc<V2Engine>,
     apps: Arc<RwLock<AppCatalog>>,
     classifier: Arc<RwLock<AppClassifier>>,
     _app_watcher: Mutex<Option<RecommendedWatcher>>,
+    reminders: ReminderStore,
     voice: Option<Arc<VoiceEngine>>,
 }
 
@@ -37,17 +40,29 @@ impl QuinnDaemon {
         voice: Option<Arc<VoiceEngine>>,
     ) -> Self {
         let app_watcher = create_app_watcher(Arc::clone(&apps), Arc::clone(&classifier));
+        let reminders = ReminderStore::load();
+        reminders.start_scheduler(Arc::new(|reminder: Reminder| {
+            let body = format!("{}", reminder.text);
+            let _ = std::process::Command::new("notify-send")
+                .args(["Quinn Reminder", &body])
+                .spawn();
+        }));
         Self {
             engine,
             apps,
             classifier,
             _app_watcher: Mutex::new(app_watcher),
+            reminders,
             voice,
         }
     }
 
     fn execute_fragment(&self, fragment: &str) -> (String, Option<(ToolCall, String)>) {
-        let result = self.engine.run(fragment, TOOL_SCHEMAS);
+        let schemas = format!("[{}]", [
+            TOOL_SCHEMAS.trim_start_matches('[').trim_end_matches(']'),
+            REMINDER_TOOL_SCHEMA.trim_start_matches('[').trim_end_matches(']'),
+        ].join(","));
+        let result = self.engine.run(fragment, &schemas);
         if let Some(err) = result.error() {
             return (format!("I couldn't process that command: {err}"), None);
         }
@@ -61,7 +76,7 @@ impl QuinnDaemon {
 
         let confidence = self
             .engine
-            .confidence_for(fragment, TOOL_SCHEMAS, &result.text)
+            .confidence_for(fragment, &schemas, &result.text)
             .unwrap_or(0.0);
         if confidence < CONFIDENCE_THRESHOLD {
             warn!(
@@ -79,11 +94,46 @@ impl QuinnDaemon {
             Err(e) => return (format!("I couldn't understand the tool call: {e}"), None),
         };
 
+        if call.name == "create_reminder" {
+            return self.create_reminder(&call);
+        }
+
         match tools::execute(&call, &self.apps, &self.classifier) {
             Ok(message) => ("Done.".to_string(), Some((call, message))),
             Err(message) => (
                 format!("I couldn't complete that: {message}"),
                 Some((call, message)),
+            ),
+        }
+    }
+
+    fn create_reminder(&self, call: &ToolCall) -> (String, Option<(ToolCall, String)>) {
+        let text = call
+            .arguments
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let delay = call
+            .arguments
+            .get("delay_seconds")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let when = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs().saturating_add(delay))
+            .unwrap_or(0);
+
+        match self.reminders.create(text, when) {
+            Ok(reminder) => (
+                format!("Reminder set for {} seconds from now.", delay),
+                Some((
+                    call.clone(),
+                    format!("created reminder #{}", reminder.id),
+                )),
+            ),
+            Err(error) => (
+                format!("I couldn't create that reminder: {error}"),
+                Some((call.clone(), error)),
             ),
         }
     }
@@ -252,7 +302,8 @@ impl QuinnDaemon {
 
     /// Capture a short microphone utterance and transcribe it locally.
     ///
-    /// The returned text can be sent through the same `Ask` method as typed input.
+    /// The returned text is intentionally fed into the same `Ask` method by the UI,
+    /// keeping voice and typed requests on one intent/execution path.
     #[zbus(out_args("text"))]
     async fn listen(&self) -> fdo::Result<String> {
         let Some(voice) = self.voice.clone() else {
