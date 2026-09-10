@@ -11,6 +11,8 @@ const BUS_NAME: &str = "org.quinn.Assistant";
 const OBJECT_PATH: &str = "/org/quinn/Assistant";
 const INTERFACE: &str = "org.quinn.Assistant";
 const VOICE_DIR: &str = ".local/share/quinn/voices/female";
+const VOSK_DIR: &str = ".local/share/quinn/vosk";
+const VOSK_MODEL_DIR: &str = ".local/share/quinn/voice-model";
 
 fn user_data_path(relative: &str) -> PathBuf {
     glib::user_data_dir().join(relative)
@@ -53,7 +55,18 @@ fn start_daemon() -> Option<Child> {
         return None;
     }
 
-    Command::new(binary).spawn().ok()
+    let mut command = Command::new(binary);
+    if let Some(vosk_dir) = std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join(VOSK_DIR)) {
+        if vosk_dir.is_dir() {
+            command.env("LD_LIBRARY_PATH", vosk_dir);
+        }
+    }
+    if let Some(model_dir) = std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join(VOSK_MODEL_DIR)) {
+        if model_dir.is_dir() {
+            command.env("QUINN_STT_MODEL", model_dir);
+        }
+    }
+    command.spawn().ok()
 }
 
 async fn make_proxy(connection: &zbus::Connection) -> Result<Proxy<'_>, zbus::Error> {
