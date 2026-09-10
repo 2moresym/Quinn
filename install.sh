@@ -20,17 +20,16 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! command -v hf >/dev/null 2>&1; then
-    cat >&2 <<'EOF'
-error: the Hugging Face CLI 'hf' is required for the one-time model download.
-Install the standalone CLI from the Hugging Face documentation, then rerun ./install.sh.
-EOF
-    exit 1
-fi
-
 if [[ ! -f "$MODEL_DIR/needle2.cact" ]]; then
+    if ! command -v hf >/dev/null 2>&1; then
+        echo "error: the Hugging Face CLI 'hf' is required for the first Needle v2 model download." >&2
+        echo "Install the standalone 'hf' CLI, then rerun ./install.sh." >&2
+        exit 1
+    fi
     echo "Downloading Needle v2 model..."
     hf download Cactus-Compute/needle2 needle2.cact --local-dir "$MODEL_DIR"
+else
+    echo "Needle v2 model already installed; reusing it."
 fi
 
 if [[ ! -d "$ROOT/Voices/female" ]]; then
@@ -41,6 +40,7 @@ fi
 VOICE_FILES=(
     "Hmm.wav"
     "Good_Morning.wav"
+    "Good_Afternoon.wav"
     "Good_Evening.wav"
     "Good_Night.wav"
     "Done.wav"
@@ -73,14 +73,26 @@ if [[ ! -f "$VOSK_DIR/libvosk.so" ]]; then
     install -m 0644 "$tmp_dir/vosk-linux-x86_64-${VOSK_VERSION}/libvosk.so" "$VOSK_DIR/libvosk.so"
     rm -rf "$tmp_dir"
     trap - EXIT
+else
+    echo "Vosk native library already installed; reusing it."
 fi
 
-echo "Building quinn-daemon with voice support..."
-QUINN_VOSK_LIB_DIR="$VOSK_DIR" cargo build --release --manifest-path "$ROOT/Cargo.toml" -p quinn-daemon --features voice
-install -m 0755 "$ROOT/target/release/quinn-daemon" "$BIN_DIR/quinn-daemon"
+if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists alsa; then
+    echo "warning: ALSA development files were not detected. Install them with:" >&2
+    echo "  sudo apt install pkg-config libasound2-dev" >&2
+fi
 
-# The daemon's build rpath points at the Quinn-managed native library directory.
-chmod 0644 "$VOSK_DIR/libvosk.so"
+export QUINN_VOSK_LIB_DIR="$VOSK_DIR"
+
+echo "Building quinn-daemon with voice support..."
+cargo build --release --manifest-path "$ROOT/Cargo.toml" -p quinn-daemon --features voice
+
+if [[ ! -x "$ROOT/target/release/quinn-daemon" ]]; then
+    echo "error: Quinn daemon build completed without producing target/release/quinn-daemon." >&2
+    exit 1
+fi
+
+install -m 0755 "$ROOT/target/release/quinn-daemon" "$BIN_DIR/quinn-daemon"
 
 echo "Installing Quinn voice clips..."
 cp -a "$ROOT/Voices/female/." "$VOICE_DIR/"
