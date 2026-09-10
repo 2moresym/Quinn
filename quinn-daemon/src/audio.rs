@@ -4,7 +4,6 @@ use std::{path::PathBuf, process::Command};
 pub enum VoiceClip {
     Done,
     Sorry,
-    Understood,
     TimerSet,
     TimerRemoved,
 }
@@ -14,7 +13,6 @@ impl VoiceClip {
         match self {
             Self::Done => "Done.wav",
             Self::Sorry => "Sorry.wav",
-            Self::Understood => "Understood.wav",
             Self::TimerSet => "Timer_Set.wav",
             Self::TimerRemoved => "Timer_Removed.wav",
         }
