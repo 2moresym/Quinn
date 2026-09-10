@@ -31,7 +31,7 @@ fn play_clip(filename: &str) -> bool {
 }
 
 fn greeting_clip() -> &'static str {
-    match glib::DateTime::now_local().ok().and_then(|time| time.hour()) {
+    match glib::DateTime::now_local().ok().map(|time| time.hour()) {
         Some(5..=11) => "Good_Morning.wav",
         Some(12..=17) => "Good_Afternoon.wav",
         Some(18..=21) => "Good_Evening.wav",
@@ -149,7 +149,7 @@ fn main() {
                 glib::MainContext::default().spawn_local(async move {
                     match zbus::Connection::session().await {
                         Ok(connection) => match make_proxy(&connection).await {
-                            Ok(proxy) => match proxy.call::<(String, String)>("Ask", &(query.clone(),)).await {
+                            Ok(proxy) => match proxy.call::<_, _, (String, String)>("Ask", &(query.clone(),)).await {
                                 Ok((response, _)) => {
                                     output_buffer.set_text(&format!("You: {query}\n\nQuinn: {response}"));
                                     status.set_text("Ready");
@@ -188,11 +188,11 @@ fn main() {
                 glib::MainContext::default().spawn_local(async move {
                     match zbus::Connection::session().await {
                         Ok(connection) => match make_proxy(&connection).await {
-                            Ok(proxy) => match proxy.call::<String>("Listen", &()).await {
+                            Ok(proxy) => match proxy.call::<_, _, String>("Listen", &()).await {
                                 Ok(text) if !text.trim().is_empty() => {
                                     entry.set_text(&text);
                                     status.set_text("Heard you — working…");
-                                    match proxy.call::<(String, String)>("Ask", &(text.clone(),)).await {
+                                    match proxy.call::<_, _, (String, String)>("Ask", &(text.clone(),)).await {
                                         Ok((response, _)) => {
                                             output.set_text(&format!("You: {text}\n\nQuinn: {response}"));
                                             status.set_text("Ready");
