@@ -17,14 +17,21 @@ jobs:
         with:
           toolchain: 1.87.0
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libgtk-4-dev curl unzip
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libgtk-4-dev curl unzip python3 python3-venv
       - name: Install native Vosk library
         run: |
           mkdir -p "$RUNNER_TEMP/vosk"
           curl -L --fail --retry 3 https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-x86_64-0.3.45.zip -o "$RUNNER_TEMP/vosk/vosk.zip"
           unzip -q "$RUNNER_TEMP/vosk/vosk.zip" -d "$RUNNER_TEMP/vosk"
-          echo "QUINN_VOSK_LIB_DIR=$RUNNER_TEMP/vosk/vosk-linux-x86_64-0.3.45" >> "$GITHUB_ENV"
+      - name: Download Needle v2 model
+        run: |
+          python3 -m venv "$RUNNER_TEMP/hf-venv"
+          "$RUNNER_TEMP/hf-venv/bin/pip" install --disable-pip-version-check --no-input huggingface_hub
+          mkdir -p dist/Quinn
+          "$RUNNER_TEMP/hf-venv/bin/hf" download Cactus-Compute/needle2 needle2.cact --local-dir dist/Quinn
       - name: Build daemon
+        env:
+          QUINN_VOSK_LIB_DIR: ${{ runner.temp }}/vosk/vosk-linux-x86_64-0.3.45
         run: cargo build --release -p quinn-daemon --features voice
       - name: Build app
         run: cargo build --release -p quinn-app
@@ -32,11 +39,11 @@ jobs:
         run: cargo build --release -p quinn-updater
       - name: Package
         run: |
-          mkdir -p dist/Quinn
           cp target/release/quinn-app dist/Quinn/
           cp target/release/quinn-daemon dist/Quinn/
           cp target/release/quinn-updater dist/Quinn/
           cp "$RUNNER_TEMP/vosk/vosk-linux-x86_64-0.3.45/libvosk.so" dist/Quinn/
+          cp Icon/Quinn_Icon.svg dist/Quinn/quinn.svg
           cp install.sh uninstall.sh dist/Quinn/
           tar -C dist -czf "quinn-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" Quinn
           sha256sum "quinn-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" > "quinn-${GITHUB_REF_NAME}-linux-x86_64.tar.gz.sha256"
