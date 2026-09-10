@@ -24,6 +24,7 @@ impl VoiceClip {
 #[derive(Clone)]
 pub struct VoicePlayer {
     directory: PathBuf,
+    player: Option<&'static str>,
 }
 
 impl VoicePlayer {
@@ -36,7 +37,10 @@ impl VoicePlayer {
                     .map(|home| home.join(".local/share/quinn/voices/female"))
             })
             .unwrap_or_else(|| PathBuf::from("Voices/female"));
-        Self { directory }
+        let player = ["pw-play", "paplay", "aplay"]
+            .into_iter()
+            .find(|program| command_available(program));
+        Self { directory, player }
     }
 
     pub fn play(&self, clip: VoiceClip) -> Result<(), String> {
@@ -45,18 +49,15 @@ impl VoicePlayer {
             return Err(format!("voice clip not found: {}", path.display()));
         }
 
-        for program in ["pw-play", "paplay", "aplay"] {
-            if !command_available(program) {
-                continue;
-            }
-            Command::new(program)
-                .arg(&path)
-                .spawn()
-                .map_err(|e| format!("could not start {program}: {e}"))?;
-            return Ok(());
-        }
+        let Some(program) = self.player else {
+            return Err("no supported audio player found (pw-play, paplay, or aplay)".to_string());
+        };
 
-        Err("no supported audio player found (pw-play, paplay, or aplay)".to_string())
+        Command::new(program)
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("could not start {program}: {e}"))?;
+        Ok(())
     }
 }
 
