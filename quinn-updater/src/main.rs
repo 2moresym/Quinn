@@ -36,14 +36,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bundle = extract.join("Quinn");
     fs::create_dir_all(&install_dir)?;
-    for name in ["quinn-app", "quinn-daemon", "quinn-updater", "libvosk.so"] {
+    for name in ["quinn-app", "quinn-daemon", "quinn-updater"] {
         let src = bundle.join(name);
-        if !src.is_file() { continue; }
+        if !src.is_file() { return Err(format!("release is missing required binary: {name}").into()); }
         let dst = install_dir.join(name);
         let tmp_dst = install_dir.join(format!(".{name}.new"));
         fs::copy(src, &tmp_dst)?;
-        fs::set_permissions(&tmp_dst, fs::Permissions::from_mode(if name.ends_with(".so") { 0o644 } else { 0o755 }))?;
+        fs::set_permissions(&tmp_dst, fs::Permissions::from_mode(0o755))?;
         fs::rename(tmp_dst, dst)?;
+    }
+
+    let lib_src = bundle.join("libvosk.so");
+    if lib_src.is_file() {
+        let data_dir = install_dir.parent().unwrap_or(&install_dir).join("share/quinn/vosk");
+        fs::create_dir_all(&data_dir)?;
+        let tmp_lib = data_dir.join(".libvosk.so.new");
+        fs::copy(lib_src, &tmp_lib)?;
+        fs::set_permissions(&tmp_lib, fs::Permissions::from_mode(0o644))?;
+        fs::rename(tmp_lib, data_dir.join("libvosk.so"))?;
     }
 
     fs::remove_dir_all(temp).ok();
