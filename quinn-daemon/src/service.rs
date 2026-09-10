@@ -23,6 +23,7 @@ use crate::{
 const CONFIDENCE_THRESHOLD: f32 = 0.70;
 const APP_EVENT_DEBOUNCE: Duration = Duration::from_millis(250);
 const REMINDER_TOOL_SCHEMA: &str = r#"[{"name":"create_reminder","description":"Create a persistent desktop reminder. Use delay_seconds for when it should fire relative to now.","parameters":{"type":"object","properties":{"text":{"type":"string"},"delay_seconds":{"type":"integer","minimum":1,"maximum":315360000}},"required":["text","delay_seconds"]}}]"#;
+const REMINDER_REMOVE_TOOL_SCHEMA: &str = r#"[{"name":"remove_reminder","description":"Remove a persistent Quinn reminder by its numeric reminder ID.","parameters":{"type":"object","properties":{"id":{"type":"integer","minimum":1}},"required":["id"]}}]"#;
 
 pub struct QuinnDaemon {
     engine: Arc<V2Engine>,
@@ -70,17 +71,22 @@ impl QuinnDaemon {
         }
     }
 
+    fn tool_schemas(&self) -> String {
+        [
+            TOOL_SCHEMAS.trim_start_matches('[').trim_end_matches(']'),
+            REMINDER_TOOL_SCHEMA
+                .trim_start_matches('[')
+                .trim_end_matches(']'),
+            REMINDER_REMOVE_TOOL_SCHEMA
+                .trim_start_matches('[')
+                .trim_end_matches(']'),
+        ]
+        .join(",")
+        .pipe(|body| format!("[{body}]"))
+    }
+
     fn execute_fragment(&self, fragment: &str) -> (String, Option<(ToolCall, String)>) {
-        let schemas = format!(
-            "[{}]",
-            [
-                TOOL_SCHEMAS.trim_start_matches('[').trim_end_matches(']'),
-                REMINDER_TOOL_SCHEMA
-                    .trim_start_matches('[')
-                    .trim_end_matches(']'),
-            ]
-            .join(","),
-        );
+        let schemas = self.tool_schemas();
         let result = self.engine.run(fragment, &schemas);
         if let Some(err) = result.error() {
             self.play_response(VoiceClip::Sorry);
@@ -119,22 +125,22 @@ impl QuinnDaemon {
             }
         };
 
-        if call.name == "create_reminder" {
-            return self.create_reminder(&call);
-        }
-
-        match tools::execute(&call, &self.apps, &self.classifier) {
-            Ok(message) => {
-                self.play_response(VoiceClip::Done);
-                ("Done.".to_string(), Some((call, message)))
-            }
-            Err(message) => {
-                self.play_response(VoiceClip::Sorry);
-                (
-                    format!("I couldn't complete that: {message}"),
-                    Some((call, message)),
-                )
-            }
+        match call.name.as_str() {
+            "create_reminder" => self.create_reminder(&call),
+            "remove_reminder" => self.remove_reminder(&call),
+            _ => match tools::execute(&call, &self.apps, &self.classifier) {
+                Ok(message) => {
+                    self.play_response(VoiceClip::Done);
+                    ("Done.".to_string(), Some((call, message)))
+                }
+                Err(message) => {
+                    self.play_response(VoiceClip::Sorry);
+                    (
+                        format!("I couldn't complete that: {message}"),
+                        Some((call, message)),
+                    )
+                }
+            },
         }
     }
 
@@ -171,6 +177,31 @@ impl QuinnDaemon {
             }
         }
     }
+
+    fn remove_reminder(&self, call: &ToolCall) -> (String, Option<(ToolCall, String)>) {
+        let id = call
+            .arguments
+            .get("id")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+
+        match self.reminders.remove(id) {
+            Ok(reminder) => {
+                self.play_response(VoiceClip::TimerRemoved);
+                (
+                    format!("Removed reminder #{}.", reminder.id),
+                    Some((call.clone(), format!("removed reminder #{}", reminder.id))),
+                )
+            }
+            Err(error) => {
+                self.play_response(VoiceClip::Sorry);
+                (
+                    format!("I couldn't remove that reminder: {error}"),
+                    Some((call.clone(), error)),
+                )
+            }
+        }
+    }
 }
 
 fn create_app_watcher(
@@ -182,38 +213,37 @@ fn create_app_watcher(
     let callback_classifier = Arc::clone(&classifier);
     let callback_debounce = Arc::clone(&debounce);
 
-    let mut watcher =
-        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-            let Ok(event) = result else {
-                warn!("application desktop-file watcher reported an error");
-                return;
-            };
-
-            if !matches!(
-                event.kind,
-                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-            ) {
-                return;
-            }
-
-            let Ok(mut last_event) = callback_debounce.lock() else {
-                warn!("application watcher debounce lock is poisoned");
-                return;
-            };
-            if last_event.elapsed() < APP_EVENT_DEBOUNCE {
-                return;
-            }
-            *last_event = Instant::now();
-            drop(last_event);
-
-            refresh_app_intelligence(&callback_apps, &callback_classifier);
-        }) {
-            Ok(watcher) => watcher,
-            Err(error) => {
-                warn!(%error, "failed to create application desktop-file watcher");
-                return None;
-            }
+    let mut watcher = match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else {
+            warn!("application desktop-file watcher reported an error");
+            return;
         };
+
+        if !matches!(
+            event.kind,
+            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+        ) {
+            return;
+        }
+
+        let Ok(mut last_event) = callback_debounce.lock() else {
+            warn!("application watcher debounce lock is poisoned");
+            return;
+        };
+        if last_event.elapsed() < APP_EVENT_DEBOUNCE {
+            return;
+        }
+        *last_event = Instant::now();
+        drop(last_event);
+
+        refresh_app_intelligence(&callback_apps, &callback_classifier);
+    }) {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            warn!(%error, "failed to create application desktop-file watcher");
+            return None;
+        }
+    };
 
     let mut watched = 0usize;
     for path in application_watch_paths() {
@@ -241,13 +271,13 @@ fn create_app_watcher(
 }
 
 fn application_watch_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::with_capacity(4);
+    let mut paths = Vec::with_capacity(3);
     if let Some(home) = std::env::var_os("HOME") {
         paths.push(PathBuf::from(home).join(".local/share/applications"));
     }
     paths.push(PathBuf::from("/usr/local/share/applications"));
     paths.push(PathBuf::from("/usr/share/applications"));
-    paths.push(PathBuf::from("/usr/share/applications"));
+    paths.push(PathBuf::from("/usr/share/gnome/applications"));
     paths
 }
 
@@ -275,7 +305,10 @@ fn refresh_app_intelligence(apps: &RwLock<AppCatalog>, classifier: &RwLock<AppCl
     if old_count != new_count || old_classified != new_classified {
         info!(
             old_count,
-            new_count, old_classified, new_classified, "refreshed application intelligence"
+            new_count,
+            old_classified,
+            new_classified,
+            "refreshed application intelligence"
         );
     }
 }
@@ -335,10 +368,6 @@ impl QuinnDaemon {
         Ok((response, tool_calls))
     }
 
-    /// Capture a short microphone utterance and transcribe it locally.
-    ///
-    /// The returned text is intentionally fed into the same `Ask` method by the UI,
-    /// keeping voice and typed requests on one intent/execution path.
     #[zbus(out_args("text"))]
     async fn listen(&self) -> fdo::Result<String> {
         let Some(voice) = self.voice.clone() else {
@@ -360,4 +389,14 @@ impl QuinnDaemon {
         args: &str,
         result: &str,
     ) -> zbus::Result<()>;
+}
+
+trait Pipe: Sized {
+    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T;
+}
+
+impl<T> Pipe for T {
+    fn pipe<U>(self, f: impl FnOnce(Self) -> U) -> U {
+        f(self)
+    }
 }
