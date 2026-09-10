@@ -13,9 +13,23 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 const BUS_NAME = 'org.quinn.Assistant';
 const OBJECT_PATH = '/org/quinn/Assistant';
 const INTERFACE = 'org.quinn.Assistant';
+const SERVICE_NAME = 'quinn.service';
 const RETRY_MS = 1500;
 const GREETING_INTERVAL_MS = 60 * 60 * 1000;
 const VOICE_DIR = GLib.build_filenamev([GLib.get_user_data_dir(), 'quinn', 'voices', 'female']);
+
+function systemdUser(action) {
+    try {
+        Gio.Subprocess.newv(
+            ['systemctl', '--user', action, SERVICE_NAME],
+            Gio.SubprocessFlags.NONE,
+        );
+        return true;
+    } catch (e) {
+        logError(e, `Failed to ${action} Quinn daemon`);
+        return false;
+    }
+}
 
 const QuinnButton = GObject.registerClass(
 class QuinnButton extends PanelMenu.Button {
@@ -276,6 +290,7 @@ class QuinnButton extends PanelMenu.Button {
 export default class QuinnExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
+        systemdUser('start');
         this._button = new QuinnButton();
         Main.panel.addToStatusArea('quinn', this._button);
         Main.wm.addKeybinding(
@@ -292,5 +307,6 @@ export default class QuinnExtension extends Extension {
         this._button?.destroy();
         this._settings = null;
         this._button = null;
+        systemdUser('stop');
     }
 }
