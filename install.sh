@@ -28,14 +28,34 @@ if [[ ! -f "$MODEL_DIR/needle2.cact" ]]; then
     hf download Cactus-Compute/needle2 needle2.cact --local-dir "$MODEL_DIR"
 fi
 
-echo "Building quinn-daemon..."
-cargo build --release --manifest-path "$ROOT/Cargo.toml" -p quinn-daemon
+if [[ ! -d "$ROOT/Voices/female" ]]; then
+    echo "error: missing Voices/female voice pack." >&2
+    exit 1
+fi
+
+VOICE_FILES=(
+    "Hmm.wav"
+    "Good_Morning.wav"
+    "Good_Evening.wav"
+    "Good_Night.wav"
+    "Done.wav"
+    "Sorry.wav"
+    "Understood.wav"
+    "Timer_Set.wav"
+    "Timer_Removed.wav"
+)
+for voice_file in "${VOICE_FILES[@]}"; do
+    if [[ ! -f "$ROOT/Voices/female/$voice_file" ]]; then
+        echo "warning: missing optional voice clip: $voice_file" >&2
+    fi
+done
+
+echo "Building quinn-daemon with voice support..."
+cargo build --release --manifest-path "$ROOT/Cargo.toml" -p quinn-daemon --features voice
 install -m 0755 "$ROOT/target/release/quinn-daemon" "$BIN_DIR/quinn-daemon"
 
-if [[ -d "$ROOT/Voices/female" ]]; then
-    echo "Installing Quinn voice clips..."
-    cp -a "$ROOT/Voices/female/." "$VOICE_DIR/"
-fi
+echo "Installing Quinn voice clips..."
+cp -a "$ROOT/Voices/female/." "$VOICE_DIR/"
 
 rm -rf "$EXT_DIR"
 mkdir -p "$EXT_DIR"
