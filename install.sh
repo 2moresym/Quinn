@@ -6,7 +6,8 @@ DATA_DIR="${HOME}/.local/share/quinn"
 MODEL_DIR="${DATA_DIR}/weights"
 VOICE_DIR="${DATA_DIR}/voices/female"
 VOSK_DIR="${DATA_DIR}/vosk"
-EXT_DIR="${HOME}/.local/share/gnome-shell/extensions/quinn@2moresym.org"
+EXT_UUID="quinn@2moresym.org"
+EXT_DIR="${HOME}/.local/share/gnome-shell/extensions/${EXT_UUID}"
 BIN_DIR="${HOME}/.local/bin"
 SERVICE_DIR="${HOME}/.config/systemd/user"
 VOSK_VERSION="0.3.45"
@@ -15,10 +16,36 @@ VOSK_URL="https://github.com/alphacep/vosk-api/releases/download/v${VOSK_VERSION
 
 mkdir -p "$MODEL_DIR" "$VOICE_DIR" "$VOSK_DIR" "$BIN_DIR" "$SERVICE_DIR"
 
+echo "== Quinn preflight =="
+
 if ! command -v cargo >/dev/null 2>&1; then
     echo "error: cargo is required to build Quinn." >&2
     exit 1
 fi
+echo "cargo: ok"
+
+if [[ "$(uname -m)" != "x86_64" ]]; then
+    echo "error: Quinn's bundled Vosk library currently supports x86_64 Linux only." >&2
+    exit 1
+fi
+echo "architecture: x86_64"
+
+if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists alsa; then
+    echo "error: ALSA development files are required for voice support." >&2
+    echo "Install them with: sudo apt install pkg-config libasound2-dev" >&2
+    exit 1
+fi
+echo "ALSA development files: ok"
+
+if ! command -v systemctl >/dev/null 2>&1; then
+    echo "error: systemctl is required for the Quinn user service." >&2
+    exit 1
+fi
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "error: the current user systemd session is unavailable." >&2
+    exit 1
+fi
+echo "systemd user session: ok"
 
 if [[ ! -f "$MODEL_DIR/needle2.cact" ]]; then
     if ! command -v hf >/dev/null 2>&1; then
@@ -29,7 +56,7 @@ if [[ ! -f "$MODEL_DIR/needle2.cact" ]]; then
     echo "Downloading Needle v2 model..."
     hf download Cactus-Compute/needle2 needle2.cact --local-dir "$MODEL_DIR"
 else
-    echo "Needle v2 model already installed; reusing it."
+    echo "Needle v2 model: already installed; reusing it."
 fi
 
 if [[ ! -d "$ROOT/Voices/female" ]]; then
@@ -55,11 +82,6 @@ for voice_file in "${VOICE_FILES[@]}"; do
     fi
 done
 
-if [[ "$(uname -m)" != "x86_64" ]]; then
-    echo "error: Quinn's bundled Vosk library currently supports x86_64 Linux only." >&2
-    exit 1
-fi
-
 if [[ ! -f "$VOSK_DIR/libvosk.so" ]]; then
     if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
         echo "error: curl and unzip are required to install the native Vosk library." >&2
@@ -74,16 +96,10 @@ if [[ ! -f "$VOSK_DIR/libvosk.so" ]]; then
     rm -rf "$tmp_dir"
     trap - EXIT
 else
-    echo "Vosk native library already installed; reusing it."
-fi
-
-if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists alsa; then
-    echo "warning: ALSA development files were not detected. Install them with:" >&2
-    echo "  sudo apt install pkg-config libasound2-dev" >&2
+    echo "Vosk native library: already installed; reusing it."
 fi
 
 export QUINN_VOSK_LIB_DIR="$VOSK_DIR"
-
 echo "Building quinn-daemon with voice support..."
 cargo build --release --manifest-path "$ROOT/Cargo.toml" -p quinn-daemon --features voice
 
@@ -91,8 +107,11 @@ if [[ ! -x "$ROOT/target/release/quinn-daemon" ]]; then
     echo "error: Quinn daemon build completed without producing target/release/quinn-daemon." >&2
     exit 1
 fi
-
 install -m 0755 "$ROOT/target/release/quinn-daemon" "$BIN_DIR/quinn-daemon"
+
+if command -v gnome-extensions >/dev/null 2>&1; then
+    gnome-extensions disable "$EXT_UUID" >/dev/null 2>&1 || true
+fi
 
 echo "Installing Quinn voice clips..."
 cp -a "$ROOT/Voices/female/." "$VOICE_DIR/"
@@ -100,20 +119,51 @@ cp -a "$ROOT/Voices/female/." "$VOICE_DIR/"
 rm -rf "$EXT_DIR"
 mkdir -p "$EXT_DIR"
 cp -a "$ROOT/extension/quinn@2moresym.org/." "$EXT_DIR/"
-if command -v glib-compile-schemas >/dev/null 2>&1 && [[ -d "$EXT_DIR/schemas" ]]; then
-    glib-compile-schemas "$EXT_DIR/schemas"
+
+if [[ ! -f "$EXT_DIR/metadata.json" ]]; then
+    echo "error: installed GNOME extension is missing metadata.json." >&2
+    exit 1
 fi
+if [[ ! -f "$EXT_DIR/schemas/org.quinn.gschema.xml" ]]; then
+    echo "error: installed GNOME extension is missing org.quinn.gschema.xml." >&2
+    exit 1
+fi
+
+if ! command -v glib-compile-schemas >/dev/null 2>&1; then
+    echo "error: glib-compile-schemas is required for the Quinn extension settings." >&2
+    exit 1
+fi
+glib-compile-schemas "$EXT_DIR/schemas"
 
 cp "$ROOT/systemd/quinn.service" "$SERVICE_DIR/quinn.service"
 systemctl --user daemon-reload
 systemctl --user enable --now quinn.service
 
+if ! systemctl --user is-active --quiet quinn.service; then
+    echo "error: Quinn daemon service failed to start." >&2
+    systemctl --user --no-pager --full status quinn.service || true
+    exit 1
+fi
+
+echo "Quinn daemon: active"
+
 if command -v gnome-extensions >/dev/null 2>&1; then
-    gnome-extensions enable quinn@2moresym.org || true
+    if ! gnome-extensions enable "$EXT_UUID"; then
+        echo "error: GNOME rejected the Quinn extension." >&2
+        exit 1
+    fi
+    extension_state=$(gnome-extensions info "$EXT_UUID" 2>/dev/null | sed -n 's/^  State: //p' || true)
+    if [[ "$extension_state" != "ACTIVE" ]]; then
+        echo "error: Quinn extension did not reach ACTIVE state (state: ${extension_state:-unknown})." >&2
+        exit 1
+    fi
+    echo "GNOME extension: active"
+else
+    echo "warning: gnome-extensions is unavailable; enable Quinn manually after installation." >&2
 fi
 
 echo
-echo 'Quinn installed. Test the daemon with:'
+echo 'Quinn installed successfully. Test the daemon with:'
 echo '  busctl --user introspect org.quinn.Assistant /org/quinn/Assistant'
 echo 'Then try:'
-echo '  busctl --user call org.quinn.Assistant /org/quinn/Assistant org.quinn.Assistant Ask s "open terminal"'
+echo '  busctl --user call org.quinn.Assistant /org/quinn/Assistant Ask s "open terminal"'
