@@ -350,7 +350,7 @@ fn normalize(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify, capability_score, AppEntry, AppType, ClassifiedApp};
+    use super::{capability_score, classify, AppType, ClassifiedApp};
     use std::path::PathBuf;
 
     #[test]
@@ -376,16 +376,5 @@ mod tests {
         };
         assert_eq!(capability_score("browser", &app), Some(0));
         assert_eq!(capability_score("web", &app), Some(1));
-    }
-
-    #[allow(dead_code)]
-    fn _app_entry_smoke() -> AppEntry {
-        AppEntry {
-            id: "test".into(),
-            name: "Test".into(),
-            generic_name: None,
-            aliases: Vec::new(),
-            desktop_file: PathBuf::from("/tmp/test.desktop"),
-        }
     }
 }
