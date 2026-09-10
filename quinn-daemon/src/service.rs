@@ -44,11 +44,17 @@ impl QuinnDaemon {
     ) -> Self {
         let app_watcher = create_app_watcher(Arc::clone(&apps), Arc::clone(&classifier));
         let reminders = ReminderStore::load();
-        reminders.start_scheduler(Arc::new(|reminder: Reminder| {
+        let reminder_voice = voice_player.clone();
+        reminders.start_scheduler(Arc::new(move |reminder: Reminder| {
             let body = reminder.text;
             let _ = std::process::Command::new("notify-send")
                 .args(["Quinn Reminder", &body])
                 .spawn();
+            if let Some(player) = &reminder_voice {
+                if let Err(error) = player.play(VoiceClip::TimerSet) {
+                    warn!(%error, "failed to play reminder voice clip");
+                }
+            }
         }));
         Self {
             engine,
@@ -79,7 +85,7 @@ impl QuinnDaemon {
                     .trim_start_matches('[')
                     .trim_end_matches(']'),
             ]
-            .join(",")
+            .join(","),
         );
         let result = self.engine.run(fragment, &schemas);
         if let Some(err) = result.error() {
@@ -247,6 +253,7 @@ fn application_watch_paths() -> Vec<PathBuf> {
     }
     paths.push(PathBuf::from("/usr/local/share/applications"));
     paths.push(PathBuf::from("/usr/share/applications"));
+    paths.push(PathBuf::from("/usr/share/applications"));
     paths.push(PathBuf::from("/usr/share/gnome/applications"));
     paths
 }
@@ -338,10 +345,6 @@ impl QuinnDaemon {
         Ok((response, tool_calls))
     }
 
-    /// Capture a short microphone utterance and transcribe it locally.
-    ///
-    /// The returned text is intentionally fed into the same `Ask` method by the UI,
-    /// keeping voice and typed requests on one intent/execution path.
     #[zbus(out_args("text"))]
     async fn listen(&self) -> fdo::Result<String> {
         let Some(voice) = self.voice.clone() else {
