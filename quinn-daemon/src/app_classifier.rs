@@ -71,9 +71,7 @@ impl AppClassifier {
     }
 
     pub fn resolve_type(&self, requested: &str) -> Option<&ClassifiedApp> {
-        let requested = normalize(requested);
-        let kind = parse_type(&requested)?;
-        self.apps.iter().find(|app| app.app_type == kind)
+        self.type_candidates(requested, 1).into_iter().next()
     }
 
     pub fn type_candidates(&self, requested: &str, limit: usize) -> Vec<&ClassifiedApp> {
@@ -81,11 +79,36 @@ impl AppClassifier {
         let Some(kind) = parse_type(&requested) else {
             return Vec::new();
         };
-        self.apps
+
+        let mut candidates: Vec<_> = self
+            .apps
             .iter()
             .filter(|app| app.app_type == kind)
-            .take(limit)
-            .collect()
+            .collect();
+        candidates.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        candidates.truncate(limit);
+        candidates
+    }
+
+    pub fn resolve_capability(&self, requested: &str) -> Option<&ClassifiedApp> {
+        let requested = normalize(requested);
+        if requested.is_empty() {
+            return None;
+        }
+
+        self.apps
+            .iter()
+            .enumerate()
+            .filter_map(|(index, app)| {
+                capability_score(&requested, app).map(|score| (score, index))
+            })
+            .min_by(|(score_a, index_a), (score_b, index_b)| {
+                score_a
+                    .cmp(score_b)
+                    .then_with(|| self.apps[*index_a].name.cmp(&self.apps[*index_b].name))
+                    .then_with(|| self.apps[*index_a].id.cmp(&self.apps[*index_b].id))
+            })
+            .map(|(_, index)| &self.apps[index])
     }
 
     fn scan_dir(&mut self, dir: &PathBuf) {
@@ -214,10 +237,7 @@ fn capabilities(categories: &[String], mime_types: &[String]) -> Vec<String> {
             out.push(value.to_string());
         }
     };
-    if mime_types
-        .iter()
-        .any(|v| v.eq_ignore_ascii_case("text/html"))
-    {
+    if mime_types.iter().any(|v| v.eq_ignore_ascii_case("text/html")) {
         add(&mut out, "html");
     }
     if mime_types
@@ -250,6 +270,29 @@ fn capabilities(categories: &[String], mime_types: &[String]) -> Vec<String> {
         add(&mut out, "browser");
     }
     out
+}
+
+fn capability_score(requested: &str, app: &ClassifiedApp) -> Option<u8> {
+    let requested = match requested {
+        "web browser" | "webbrowser" => "browser",
+        "file manager" | "filemanager" => "file-manager",
+        "media" => "media-player",
+        "photo viewer" => "image-viewer",
+        "terminal emulator" => "terminal",
+        "developer tools" | "ide" | "code editor" => "development",
+        value => value,
+    };
+
+    if app.app_type.as_str() == requested {
+        return Some(0);
+    }
+    if app.capabilities.iter().any(|v| v == requested) {
+        return Some(1);
+    }
+    if app.capabilities.iter().any(|v| v.contains(requested)) {
+        return Some(2);
+    }
+    None
 }
 
 fn parse_type(input: &str) -> Option<AppType> {
@@ -307,7 +350,8 @@ fn normalize(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify, AppType};
+    use super::{classify, capability_score, AppEntry, AppType, ClassifiedApp};
+    use std::path::PathBuf;
 
     #[test]
     fn helium_like_metadata_is_browser() {
@@ -319,5 +363,29 @@ mod tests {
             &["text/html".into(), "x-scheme-handler/https".into()],
         );
         assert_eq!(result, AppType::Browser);
+    }
+
+    #[test]
+    fn browser_capability_resolves_to_browser_type() {
+        let app = ClassifiedApp {
+            id: "helium".into(),
+            name: "Helium".into(),
+            app_type: AppType::Browser,
+            capabilities: vec!["web".into(), "https".into()],
+            desktop_file: PathBuf::from("/tmp/helium.desktop"),
+        };
+        assert_eq!(capability_score("browser", &app), Some(0));
+        assert_eq!(capability_score("web", &app), Some(1));
+    }
+
+    #[allow(dead_code)]
+    fn _app_entry_smoke() -> AppEntry {
+        AppEntry {
+            id: "test".into(),
+            name: "Test".into(),
+            generic_name: None,
+            aliases: Vec::new(),
+            desktop_file: PathBuf::from("/tmp/test.desktop"),
+        }
     }
 }
