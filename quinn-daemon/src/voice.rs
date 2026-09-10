@@ -25,9 +25,9 @@ impl VoiceEngine {
                 .map(PathBuf::from)
                 .or_else(default_model_path)
                 .ok_or_else(|| "could not determine the Vosk model path".to_string())?;
-            let model_path = path
-                .to_str()
-                .ok_or_else(|| format!("Vosk model path is not valid UTF-8: {}", path.display()))?;
+            let model_path = path.to_str().ok_or_else(|| {
+                format!("Vosk model path is not valid UTF-8: {}", path.display())
+            })?;
             let model = vosk::Model::new(model_path.to_owned())
                 .ok_or_else(|| format!("could not load Vosk model at {}", path.display()))?;
             return Ok(Self {
@@ -117,12 +117,9 @@ fn capture_audio() -> Result<(Vec<f32>, u32), String> {
                 .build_input_stream(
                     &config,
                     move |data: &[i16], _| {
-                        let mut out = callback_samples
-                            .lock()
-                            .expect("microphone mutex poisoned");
+                        let mut out = callback_samples.lock().expect("microphone mutex poisoned");
                         for frame in data.chunks(channels) {
-                            let sum: f32 =
-                                frame.iter().map(|s| *s as f32 / 32768.0).sum();
+                            let sum: f32 = frame.iter().map(|s| *s as f32 / 32768.0).sum();
                             out.push(sum / frame.len() as f32);
                         }
                     },
@@ -137,9 +134,7 @@ fn capture_audio() -> Result<(Vec<f32>, u32), String> {
                 .build_input_stream(
                     &config,
                     move |data: &[u16], _| {
-                        let mut out = callback_samples
-                            .lock()
-                            .expect("microphone mutex poisoned");
+                        let mut out = callback_samples.lock().expect("microphone mutex poisoned");
                         for frame in data.chunks(channels) {
                             let sum: f32 = frame
                                 .iter()
