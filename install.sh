@@ -9,6 +9,7 @@ VOSK_DIR="${DATA_DIR}/vosk"
 VOSK_MODEL_DIR="${DATA_DIR}/voice-model"
 BIN_DIR="${HOME}/.local/bin"
 APP_DIR="${HOME}/.local/share/applications"
+ICON_DIR="${HOME}/.local/share/icons/hicolor/scalable/apps"
 
 VOSK_VERSION="0.3.45"
 VOSK_ARCHIVE="vosk-linux-x86_64-${VOSK_VERSION}.zip"
@@ -17,7 +18,7 @@ VOSK_MODEL_NAME="vosk-model-small-en-us-0.15"
 VOSK_MODEL_ARCHIVE="${VOSK_MODEL_NAME}.zip"
 VOSK_MODEL_URL="https://alphacephei.com/vosk/models/${VOSK_MODEL_ARCHIVE}"
 
-mkdir -p "$MODEL_DIR" "$VOICE_DIR" "$VOSK_DIR" "$BIN_DIR" "$APP_DIR"
+mkdir -p "$MODEL_DIR" "$VOICE_DIR" "$VOSK_DIR" "$BIN_DIR" "$APP_DIR" "$ICON_DIR"
 
 echo "== Quinn Beta installer =="
 command -v pkg-config >/dev/null 2>&1 || { echo "error: pkg-config is required." >&2; exit 1; }
@@ -30,11 +31,14 @@ command -v unzip >/dev/null 2>&1 || { echo "error: unzip is required." >&2; exit
 echo "Native dependencies: ok"
 
 if [[ ! -f "$MODEL_DIR/needle2.cact" ]]; then
-    if [[ -x "$ROOT/quinn-app" || -x "$ROOT/quinn-daemon" ]]; then
+    if [[ -f "$ROOT/needle2.cact" ]]; then
+        echo "Installing bundled Needle v2 model..."
+        install -m 0644 "$ROOT/needle2.cact" "$MODEL_DIR/needle2.cact"
+    else
         command -v hf >/dev/null 2>&1 || { echo "error: install the standalone hf CLI for the first Needle download." >&2; exit 1; }
+        echo "Downloading Needle v2 model..."
+        hf download Cactus-Compute/needle2 needle2.cact --local-dir "$MODEL_DIR"
     fi
-    echo "Downloading Needle v2 model..."
-    hf download Cactus-Compute/needle2 needle2.cact --local-dir "$MODEL_DIR"
 else
     echo "Needle v2: reusing existing model"
 fi
@@ -105,6 +109,12 @@ elif command -v cargo >/dev/null 2>&1; then
     install -m 0755 target/release/quinn-updater "$BIN_DIR/quinn-updater"
 fi
 
+if [[ -f "$ROOT/quinn.svg" ]]; then
+    install -m 0644 "$ROOT/quinn.svg" "$ICON_DIR/quinn.svg"
+elif [[ -f "$ROOT/Icon/Quinn_Icon.svg" ]]; then
+    install -m 0644 "$ROOT/Icon/Quinn_Icon.svg" "$ICON_DIR/quinn.svg"
+fi
+
 cp "$ROOT/quinn-app/org.quinn.AssistantApp.desktop" "$APP_DIR/org.quinn.AssistantApp.desktop"
 sed -i "s|^Exec=.*$|Exec=$BIN_DIR/quinn-app|" "$APP_DIR/org.quinn.AssistantApp.desktop"
 
@@ -116,5 +126,7 @@ rm -rf "$HOME/.local/share/gnome-shell/extensions/quinn@2moresym.org"
 systemctl --user disable --now quinn.service >/dev/null 2>&1 || true
 rm -f "$HOME/.config/systemd/user/quinn.service"
 systemctl --user daemon-reload >/dev/null 2>&1 || true
+
+glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
 
 printf '\nQuinn Beta installed.\nLaunch: %s\n' "$BIN_DIR/quinn-app"
