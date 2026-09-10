@@ -147,8 +147,8 @@ if [[ ! -f "$EXT_DIR/metadata.json" ]]; then
     echo "error: installed GNOME extension is missing metadata.json." >&2
     exit 1
 fi
-if [[ ! -f "$EXT_DIR/schemas/org.quinn.gschema.xml" ]]; then
-    echo "error: installed GNOME extension is missing org.quinn.gschema.xml." >&2
+if [[ ! -f "$EXT_DIR/schemas/org.gnome.shell.extensions.quinn.gschema.xml" ]]; then
+    echo "error: installed GNOME extension is missing the Quinn GSettings schema." >&2
     exit 1
 fi
 
@@ -159,8 +159,6 @@ fi
 glib-compile-schemas "$EXT_DIR/schemas"
 
 cp "$ROOT/systemd/quinn.service" "$SERVICE_DIR/quinn.service"
-# Pass the resolved STT model path to the user service explicitly so systemd has
-# the same voice model location as the installer, independent of shell environment.
 sed -i "s|^Environment=RUST_LOG=.*$|Environment=RUST_LOG=quinn_daemon=info\\nEnvironment=QUINN_STT_MODEL=%h/.local/share/quinn/voice-model|" "$SERVICE_DIR/quinn.service"
 systemctl --user daemon-reload
 systemctl --user enable --now quinn.service
