@@ -60,10 +60,16 @@ pub struct AppClassifier {
 impl AppClassifier {
     pub fn discover() -> Self {
         let mut classifier = Self::default();
-        for dir in application_dirs() {
-            classifier.scan_dir(&dir);
-        }
+        classifier.refresh();
         classifier
+    }
+
+    pub fn refresh(&mut self) {
+        let mut fresh = Self::default();
+        for dir in application_dirs() {
+            fresh.scan_dir(&dir);
+        }
+        *self = fresh;
     }
 
     pub fn len(&self) -> usize {
