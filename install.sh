@@ -6,6 +6,7 @@ DATA_DIR="${HOME}/.local/share/quinn"
 MODEL_DIR="${DATA_DIR}/weights"
 VOICE_DIR="${DATA_DIR}/voices/female"
 VOSK_DIR="${DATA_DIR}/vosk"
+VOSK_MODEL_DIR="${DATA_DIR}/voice-model"
 EXT_UUID="quinn@2moresym.org"
 EXT_DIR="${HOME}/.local/share/gnome-shell/extensions/${EXT_UUID}"
 BIN_DIR="${HOME}/.local/bin"
@@ -13,6 +14,9 @@ SERVICE_DIR="${HOME}/.config/systemd/user"
 VOSK_VERSION="0.3.45"
 VOSK_ARCHIVE="vosk-linux-x86_64-${VOSK_VERSION}.zip"
 VOSK_URL="https://github.com/alphacep/vosk-api/releases/download/v${VOSK_VERSION}/${VOSK_ARCHIVE}"
+VOSK_MODEL_NAME="vosk-model-small-en-us-0.15"
+VOSK_MODEL_ARCHIVE="${VOSK_MODEL_NAME}.zip"
+VOSK_MODEL_URL="https://alphacephei.com/vosk/models/${VOSK_MODEL_ARCHIVE}"
 
 mkdir -p "$MODEL_DIR" "$VOICE_DIR" "$VOSK_DIR" "$BIN_DIR" "$SERVICE_DIR"
 
@@ -99,7 +103,26 @@ else
     echo "Vosk native library: already installed; reusing it."
 fi
 
+if [[ ! -f "$VOSK_MODEL_DIR/am/final.mdl" ]]; then
+    if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
+        echo "error: curl and unzip are required to install the Vosk speech model." >&2
+        exit 1
+    fi
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT
+    echo "Downloading lightweight Vosk English speech model (~40 MB)..."
+    curl -L --fail --retry 3 "$VOSK_MODEL_URL" -o "$tmp_dir/$VOSK_MODEL_ARCHIVE"
+    unzip -q "$tmp_dir/$VOSK_MODEL_ARCHIVE" -d "$tmp_dir"
+    rm -rf "$VOSK_MODEL_DIR"
+    mv "$tmp_dir/$VOSK_MODEL_NAME" "$VOSK_MODEL_DIR"
+    rm -rf "$tmp_dir"
+    trap - EXIT
+else
+    echo "Vosk speech model: already installed; reusing it."
+fi
+
 export QUINN_VOSK_LIB_DIR="$VOSK_DIR"
+export QUINN_STT_MODEL="$VOSK_MODEL_DIR"
 echo "Building quinn-daemon with voice support..."
 cargo build --release --manifest-path "$ROOT/Cargo.toml" -p quinn-daemon --features voice
 
@@ -136,6 +159,9 @@ fi
 glib-compile-schemas "$EXT_DIR/schemas"
 
 cp "$ROOT/systemd/quinn.service" "$SERVICE_DIR/quinn.service"
+# Pass the resolved STT model path to the user service explicitly so systemd has
+# the same voice model location as the installer, independent of shell environment.
+sed -i "s|^Environment=RUST_LOG=.*$|Environment=RUST_LOG=quinn_daemon=info\\nEnvironment=QUINN_STT_MODEL=%h/.local/share/quinn/voice-model|" "$SERVICE_DIR/quinn.service"
 systemctl --user daemon-reload
 systemctl --user enable --now quinn.service
 
