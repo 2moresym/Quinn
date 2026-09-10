@@ -14,10 +14,20 @@ jobs:
             feature_args: ""
           - name: voice
             feature_args: "--features voice"
+            vosk_url: "https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-x86_64-0.3.45.zip"
     steps:
       - uses: actions/checkout@v4
-      - name: Install Linux audio build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev
+      - name: Install Linux audio/build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev unzip curl
+      - name: Install native Vosk library
+        if: matrix.name == 'voice'
+        run: |
+          mkdir -p "$RUNNER_TEMP/vosk"
+          curl -L --fail --retry 3 "$VOSK_URL" -o "$RUNNER_TEMP/vosk/vosk.zip"
+          unzip -q "$RUNNER_TEMP/vosk/vosk.zip" -d "$RUNNER_TEMP/vosk"
+          echo "QUINN_VOSK_LIB_DIR=$RUNNER_TEMP/vosk/vosk-linux-x86_64-0.3.45" >> "$GITHUB_ENV"
+        env:
+          VOSK_URL: ${{ matrix.vosk_url }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.87.0
