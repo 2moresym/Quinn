@@ -14,7 +14,7 @@ const BUS_NAME = 'org.quinn.Assistant';
 const OBJECT_PATH = '/org/quinn/Assistant';
 const INTERFACE = 'org.quinn.Assistant';
 const SERVICE_NAME = 'quinn.service';
-const SETTINGS_SCHEMA = 'org.quinn';
+const SETTINGS_SCHEMA = 'org.gnome.shell.extensions.quinn';
 const RETRY_MS = 1500;
 const GREETING_INTERVAL_MS = 60 * 60 * 1000;
 const VOICE_DIR = GLib.build_filenamev([GLib.get_user_data_dir(), 'quinn', 'voices', 'female']);
@@ -290,7 +290,7 @@ class QuinnButton extends PanelMenu.Button {
 
 export default class QuinnExtension extends Extension {
     enable() {
-        this._settings = new Gio.Settings({schema_id: SETTINGS_SCHEMA});
+        this._settings = this.getSettings(SETTINGS_SCHEMA);
         systemdUser('start');
         this._button = new QuinnButton();
         Main.panel.addToStatusArea('quinn', this._button);
