@@ -46,9 +46,21 @@ impl ReminderStore {
             return Err("reminder time must be in the future".to_string());
         }
 
-        let mut reminders = self.reminders.lock().map_err(|_| "reminder store lock is poisoned".to_string())?;
-        let id = reminders.iter().map(|r| r.id).max().unwrap_or(0).saturating_add(1);
-        let reminder = Reminder { id, text: text.to_string(), when_unix };
+        let mut reminders = self
+            .reminders
+            .lock()
+            .map_err(|_| "reminder store lock is poisoned".to_string())?;
+        let id = reminders
+            .iter()
+            .map(|r| r.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let reminder = Reminder {
+            id,
+            text: text.to_string(),
+            when_unix,
+        };
         reminders.push(reminder.clone());
         save(&self.path, &reminders)?;
         Ok(reminder)
@@ -101,7 +113,8 @@ fn reminder_path() -> PathBuf {
 }
 
 fn save(path: &PathBuf, reminders: &[Reminder]) -> Result<(), String> {
-    let data = serde_json::to_vec_pretty(reminders).map_err(|e| format!("failed to encode reminders: {e}"))?;
+    let data = serde_json::to_vec_pretty(reminders)
+        .map_err(|e| format!("failed to encode reminders: {e}"))?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, data).map_err(|e| format!("failed to write reminders: {e}"))?;
     fs::rename(&tmp, path).map_err(|e| format!("failed to commit reminders: {e}"))
