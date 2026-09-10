@@ -28,13 +28,16 @@ jobs:
         run: cargo build --release -p quinn-daemon --features voice
       - name: Build app
         run: cargo build --release -p quinn-app
+      - name: Build updater
+        run: cargo build --release -p quinn-updater
       - name: Package
         run: |
           mkdir -p dist/Quinn
           cp target/release/quinn-app dist/Quinn/
           cp target/release/quinn-daemon dist/Quinn/
+          cp target/release/quinn-updater dist/Quinn/
           cp "$RUNNER_TEMP/vosk/vosk-linux-x86_64-0.3.45/libvosk.so" dist/Quinn/
-          cp install.sh uninstall.sh dist/Quinn/ 2>/dev/null || true
+          cp install.sh uninstall.sh dist/Quinn/
           tar -C dist -czf "quinn-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" Quinn
           sha256sum "quinn-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" > "quinn-${GITHUB_REF_NAME}-linux-x86_64.tar.gz.sha256"
       - name: Create GitHub release
