@@ -64,8 +64,37 @@ pub fn split_utterance(input: &str) -> Vec<String> {
     if out.is_empty() {
         vec![input.trim().to_string()]
     } else {
+        // Carry an omitted leading action verb across conjunctions.
+        // Example: "open Discord and Chrome" becomes
+        // ["open Discord", "open Chrome"].
+        if let Some(first) = out.first().cloned() {
+            if let Some((verb, _)) = first.split_once(char::is_whitespace) {
+                if is_repeatable_action(verb) {
+                    for fragment in out.iter_mut().skip(1) {
+                        if !starts_with_action(fragment) {
+                            *fragment = format!("{verb} {fragment}");
+                        }
+                    }
+                }
+            }
+        }
         out
     }
+}
+
+fn is_repeatable_action(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "open" | "launch" | "start" | "run" | "close" | "kill" | "stop" | "search"
+    )
+}
+
+fn starts_with_action(fragment: &str) -> bool {
+    fragment
+        .split_whitespace()
+        .next()
+        .map(is_repeatable_action)
+        .unwrap_or(false)
 }
 
 fn push_fragment(out: &mut Vec<String>, current: &mut String) {
@@ -84,7 +113,15 @@ mod tests {
     fn splits_common_multi_commands() {
         assert_eq!(
             split_utterance("open Discord and Chrome + terminal"),
-            vec!["open Discord", "Chrome", "terminal"]
+            vec!["open Discord", "open Chrome", "open terminal"]
+        );
+    }
+
+    #[test]
+    fn preserves_new_actions_after_conjunctions() {
+        assert_eq!(
+            split_utterance("open Discord and close Firefox"),
+            vec!["open Discord", "close Firefox"]
         );
     }
 
@@ -92,7 +129,7 @@ mod tests {
     fn keeps_quoted_text_together() {
         assert_eq!(
             split_utterance("open \"Visual Studio Code\" and terminal"),
-            vec!["open \"Visual Studio Code\"", "terminal"]
+            vec!["open \"Visual Studio Code\"", "open terminal"]
         );
     }
 
