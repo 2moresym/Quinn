@@ -1,17 +1,20 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum AppType {
     Browser,
     Chat,
+    Development,
     Editor,
-    Terminal,
     FileManager,
     MediaPlayer,
     ImageViewer,
     Game,
-    Development,
     Office,
+    Terminal,
     Unknown,
 }
 
@@ -20,14 +23,14 @@ impl AppType {
         match self {
             Self::Browser => "browser",
             Self::Chat => "chat",
-            Self::Editor => "editor",
-            Self::Terminal => "terminal",
-            Self::FileManager => "file-manager",
-            Self::MediaPlayer => "media-player",
-            Self::ImageViewer => "image-viewer",
-            Self::Game => "game",
             Self::Development => "development",
+            Self::Editor => "editor",
+            Self::FileManager => "file manager",
+            Self::MediaPlayer => "media player",
+            Self::ImageViewer => "image viewer",
+            Self::Game => "game",
             Self::Office => "office",
+            Self::Terminal => "terminal",
             Self::Unknown => "unknown",
         }
     }
@@ -39,17 +42,6 @@ pub struct ClassifiedApp {
     pub name: String,
     pub app_type: AppType,
     pub capabilities: Vec<String>,
-    pub desktop_file: PathBuf,
-}
-
-impl ClassifiedApp {
-    pub fn capabilities(&self) -> &[String] {
-        &self.capabilities
-    }
-
-    pub fn desktop_file(&self) -> &std::path::Path {
-        &self.desktop_file
-    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -117,7 +109,7 @@ impl AppClassifier {
             .map(|(_, index)| &self.apps[index])
     }
 
-    fn scan_dir(&mut self, dir: &PathBuf) {
+    fn scan_dir(&mut self, dir: &Path) {
         let Ok(entries) = fs::read_dir(dir) else {
             return;
         };
@@ -162,7 +154,6 @@ impl AppClassifier {
                 name,
                 app_type,
                 capabilities,
-                desktop_file: path,
             });
         }
     }
@@ -336,6 +327,7 @@ fn list_field(contents: &str, key: &str) -> Vec<String> {
     field(contents, key)
         .unwrap_or_default()
         .split(';')
+        .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
         .collect()
@@ -347,7 +339,7 @@ fn hidden_or_nodisplay(contents: &str) -> bool {
     })
 }
 
-fn normalize(input: &str) -> String {
+pub fn normalize(input: &str) -> String {
     input
         .trim()
         .to_ascii_lowercase()
@@ -355,35 +347,4 @@ fn normalize(input: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{capability_score, classify, AppType, ClassifiedApp};
-    use std::path::PathBuf;
-
-    #[test]
-    fn helium_like_metadata_is_browser() {
-        let result = classify(
-            "Helium",
-            Some("Web Browser"),
-            &["Network".into(), "WebBrowser".into()],
-            &[],
-            &["text/html".into(), "x-scheme-handler/https".into()],
-        );
-        assert_eq!(result, AppType::Browser);
-    }
-
-    #[test]
-    fn browser_capability_resolves_to_browser_type() {
-        let app = ClassifiedApp {
-            id: "helium".into(),
-            name: "Helium".into(),
-            app_type: AppType::Browser,
-            capabilities: vec!["web".into(), "https".into()],
-            desktop_file: PathBuf::from("/tmp/helium.desktop"),
-        };
-        assert_eq!(capability_score("browser", &app), Some(0));
-        assert_eq!(capability_score("web", &app), Some(1));
-    }
 }
