@@ -1,5 +1,6 @@
 mod app_classifier;
 mod apps;
+mod audio;
 mod commands;
 mod reminders;
 mod service;
@@ -58,7 +59,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let daemon = service::QuinnDaemon::new(engine, apps, classifier, voice);
+    let voice_player = Arc::new(audio::VoicePlayer::new());
+    let daemon = service::QuinnDaemon::new(engine, apps, classifier, voice, Some(voice_player));
     let _connection = connection::Builder::session()?
         .name("org.quinn.Assistant")?
         .serve_at("/org/quinn/Assistant", daemon)?
