@@ -66,6 +66,24 @@ impl ReminderStore {
         Ok(reminder)
     }
 
+    pub fn remove(&self, id: u64) -> Result<Reminder, String> {
+        if id == 0 {
+            return Err("reminder id must be greater than zero".to_string());
+        }
+
+        let mut reminders = self
+            .reminders
+            .lock()
+            .map_err(|_| "reminder store lock is poisoned".to_string())?;
+        let index = reminders
+            .iter()
+            .position(|reminder| reminder.id == id)
+            .ok_or_else(|| format!("reminder #{id} was not found"))?;
+        let removed = reminders.remove(index);
+        save(&self.path, &reminders)?;
+        Ok(removed)
+    }
+
     pub fn take_due(&self) -> Vec<Reminder> {
         let now = unix_now();
         let Ok(mut reminders) = self.reminders.lock() else {
@@ -125,4 +143,36 @@ fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReminderStore;
+    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    fn test_store() -> ReminderStore {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("quinn-reminders-{suffix}.json"));
+        ReminderStore {
+            path,
+            reminders: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    #[test]
+    fn remove_deletes_and_persists_reminder() {
+        let store = test_store();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let created = store.create("test", now + 60).unwrap();
+        let removed = store.remove(created.id).unwrap();
+        assert_eq!(removed.id, created.id);
+        assert!(store.remove(created.id).is_err());
+        let _ = fs::remove_file(store.path);
+    }
 }
