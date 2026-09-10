@@ -105,9 +105,7 @@ impl AppClassifier {
         self.apps
             .iter()
             .enumerate()
-            .filter_map(|(index, app)| {
-                capability_score(&requested, app).map(|score| (score, index))
-            })
+            .filter_map(|(index, app)| capability_score(&requested, app).map(|score| (score, index)))
             .min_by(|(score_a, index_a), (score_b, index_b)| {
                 score_a
                     .cmp(score_b)
@@ -243,7 +241,10 @@ fn capabilities(categories: &[String], mime_types: &[String]) -> Vec<String> {
             out.push(value.to_string());
         }
     };
-    if mime_types.iter().any(|v| v.eq_ignore_ascii_case("text/html")) {
+    if mime_types
+        .iter()
+        .any(|v| v.eq_ignore_ascii_case("text/html"))
+    {
         add(&mut out, "html");
     }
     if mime_types
