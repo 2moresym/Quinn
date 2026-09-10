@@ -1,11 +1,17 @@
 mod app_classifier;
 mod apps;
 mod commands;
+mod reminders;
 mod service;
 mod tools;
 mod voice;
 
-use std::{env, error::Error, path::PathBuf, sync::{Arc, RwLock}};
+use std::{
+    env,
+    error::Error,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 use needle_infer::v2_engine::V2Engine;
 use tracing::{info, warn};
