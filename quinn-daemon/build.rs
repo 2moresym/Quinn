@@ -5,11 +5,23 @@ fn main() {
         return;
     }
 
-    let lib_dir = env::var_os("QUINN_VOSK_LIB_DIR")
-        .map(PathBuf::from)
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=QUINN_VOSK_LIB_DIR");
+
+    let candidates = [
+        env::var_os("QUINN_VOSK_LIB_DIR").map(PathBuf::from),
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".local/share/quinn/vosk")),
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../native/vosk")),
+    ];
+
+    let lib_dir = candidates
+        .into_iter()
+        .flatten()
+        .find(|path| path.join("libvosk.so").is_file())
         .unwrap_or_else(|| PathBuf::from("../native/vosk"));
 
-    println!("cargo:rerun-if-env-changed=QUINN_VOSK_LIB_DIR");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=dylib=vosk");
 
