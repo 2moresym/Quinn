@@ -13,6 +13,7 @@ use zbus::{fdo, interface, object_server::SignalEmitter};
 use crate::{
     app_classifier::AppClassifier,
     apps::AppCatalog,
+    audio::{VoiceClip, VoicePlayer},
     commands::split_utterance,
     reminders::{Reminder, ReminderStore},
     tools::{self, ToolCall, TOOL_SCHEMAS},
@@ -30,6 +31,7 @@ pub struct QuinnDaemon {
     _app_watcher: Mutex<Option<RecommendedWatcher>>,
     reminders: ReminderStore,
     voice: Option<Arc<VoiceEngine>>,
+    voice_player: Option<Arc<VoicePlayer>>,
 }
 
 impl QuinnDaemon {
@@ -38,14 +40,21 @@ impl QuinnDaemon {
         apps: Arc<RwLock<AppCatalog>>,
         classifier: Arc<RwLock<AppClassifier>>,
         voice: Option<Arc<VoiceEngine>>,
+        voice_player: Option<Arc<VoicePlayer>>,
     ) -> Self {
         let app_watcher = create_app_watcher(Arc::clone(&apps), Arc::clone(&classifier));
         let reminders = ReminderStore::load();
-        reminders.start_scheduler(Arc::new(|reminder: Reminder| {
-            let body = format!("{}", reminder.text);
+        let reminder_voice = voice_player.clone();
+        reminders.start_scheduler(Arc::new(move |reminder: Reminder| {
+            let body = reminder.text;
             let _ = std::process::Command::new("notify-send")
                 .args(["Quinn Reminder", &body])
                 .spawn();
+            if let Some(player) = &reminder_voice {
+                if let Err(error) = player.play(VoiceClip::TimerSet) {
+                    warn!(%error, "failed to play reminder voice clip");
+                }
+            }
         }));
         Self {
             engine,
@@ -54,6 +63,16 @@ impl QuinnDaemon {
             _app_watcher: Mutex::new(app_watcher),
             reminders,
             voice,
+            voice_player,
+        }
+    }
+
+    fn play_response(&self, clip: VoiceClip) {
+        let Some(player) = &self.voice_player else {
+            return;
+        };
+        if let Err(error) = player.play(clip) {
+            warn!(%error, ?clip, "failed to play Quinn response voice clip");
         }
     }
 
@@ -64,10 +83,12 @@ impl QuinnDaemon {
         ].join(","));
         let result = self.engine.run(fragment, &schemas);
         if let Some(err) = result.error() {
+            self.play_response(VoiceClip::Sorry);
             return (format!("I couldn't process that command: {err}"), None);
         }
 
         let Some(raw_call) = result.tool_call.as_deref() else {
+            self.play_response(VoiceClip::Understood);
             return (
                 "I didn't find an action for that command.".to_string(),
                 None,
@@ -83,6 +104,7 @@ impl QuinnDaemon {
                 query = fragment,
                 confidence, "tool call rejected by confidence gate"
             );
+            self.play_response(VoiceClip::Sorry);
             return (
                 "I'm not confident enough to run that command.".to_string(),
                 None,
@@ -91,7 +113,10 @@ impl QuinnDaemon {
 
         let call = match tools::parse_tool_call(raw_call) {
             Ok(call) => call,
-            Err(e) => return (format!("I couldn't understand the tool call: {e}"), None),
+            Err(e) => {
+                self.play_response(VoiceClip::Sorry);
+                return (format!("I couldn't understand the tool call: {e}"), None);
+            }
         };
 
         if call.name == "create_reminder" {
@@ -99,11 +124,17 @@ impl QuinnDaemon {
         }
 
         match tools::execute(&call, &self.apps, &self.classifier) {
-            Ok(message) => ("Done.".to_string(), Some((call, message))),
-            Err(message) => (
-                format!("I couldn't complete that: {message}"),
-                Some((call, message)),
-            ),
+            Ok(message) => {
+                self.play_response(VoiceClip::Done);
+                ("Done.".to_string(), Some((call, message)))
+            }
+            Err(message) => {
+                self.play_response(VoiceClip::Sorry);
+                (
+                    format!("I couldn't complete that: {message}"),
+                    Some((call, message)),
+                )
+            }
         }
     }
 
@@ -124,17 +155,23 @@ impl QuinnDaemon {
             .unwrap_or(0);
 
         match self.reminders.create(text, when) {
-            Ok(reminder) => (
-                format!("Reminder set for {} seconds from now.", delay),
-                Some((
-                    call.clone(),
-                    format!("created reminder #{}", reminder.id),
-                )),
-            ),
-            Err(error) => (
-                format!("I couldn't create that reminder: {error}"),
-                Some((call.clone(), error)),
-            ),
+            Ok(reminder) => {
+                self.play_response(VoiceClip::TimerSet);
+                (
+                    format!("Reminder set for {} seconds from now.", delay),
+                    Some((
+                        call.clone(),
+                        format!("created reminder #{}", reminder.id),
+                    )),
+                )
+            }
+            Err(error) => {
+                self.play_response(VoiceClip::Sorry);
+                (
+                    format!("I couldn't create that reminder: {error}"),
+                    Some((call.clone(), error)),
+                )
+            }
         }
     }
 }
@@ -300,10 +337,6 @@ impl QuinnDaemon {
         Ok((response, tool_calls))
     }
 
-    /// Capture a short microphone utterance and transcribe it locally.
-    ///
-    /// The returned text is intentionally fed into the same `Ask` method by the UI,
-    /// keeping voice and typed requests on one intent/execution path.
     #[zbus(out_args("text"))]
     async fn listen(&self) -> fdo::Result<String> {
         let Some(voice) = self.voice.clone() else {
