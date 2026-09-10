@@ -1,9 +1,11 @@
 use std::{
+    path::PathBuf,
     sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 
 use needle_infer::v2_engine::V2Engine;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::json;
 use tracing::{info, warn};
 use zbus::{fdo, interface, object_server::SignalEmitter};
@@ -17,13 +19,13 @@ use crate::{
 };
 
 const CONFIDENCE_THRESHOLD: f32 = 0.70;
-const APP_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+const APP_EVENT_DEBOUNCE: Duration = Duration::from_millis(250);
 
 pub struct QuinnDaemon {
     engine: Arc<V2Engine>,
     apps: Arc<RwLock<AppCatalog>>,
     classifier: Arc<RwLock<AppClassifier>>,
-    last_app_refresh: Mutex<Instant>,
+    _app_watcher: Mutex<Option<RecommendedWatcher>>,
     voice: Option<Arc<VoiceEngine>>,
 }
 
@@ -34,54 +36,13 @@ impl QuinnDaemon {
         classifier: Arc<RwLock<AppClassifier>>,
         voice: Option<Arc<VoiceEngine>>,
     ) -> Self {
+        let app_watcher = create_app_watcher(Arc::clone(&apps), Arc::clone(&classifier));
         Self {
             engine,
             apps,
             classifier,
-            last_app_refresh: Mutex::new(Instant::now()),
+            _app_watcher: Mutex::new(app_watcher),
             voice,
-        }
-    }
-
-    fn refresh_apps_if_stale(&self) {
-        let Ok(mut last_refresh) = self.last_app_refresh.lock() else {
-            warn!("application refresh timer lock is poisoned");
-            return;
-        };
-        if last_refresh.elapsed() < APP_REFRESH_INTERVAL {
-            return;
-        }
-
-        let old_count = self.apps.read().map(|catalog| catalog.len()).unwrap_or(0);
-        let old_classified = self
-            .classifier
-            .read()
-            .map(|classifier| classifier.len())
-            .unwrap_or(0);
-
-        let Ok(mut apps) = self.apps.write() else {
-            warn!("application catalog lock is poisoned");
-            return;
-        };
-        let Ok(mut classifier) = self.classifier.write() else {
-            warn!("application classifier lock is poisoned");
-            return;
-        };
-
-        apps.refresh();
-        classifier.refresh();
-        *last_refresh = Instant::now();
-
-        let new_count = apps.len();
-        let new_classified = classifier.len();
-        if old_count != new_count || old_classified != new_classified {
-            info!(
-                old_count,
-                new_count,
-                old_classified,
-                new_classified,
-                "refreshed application intelligence"
-            );
         }
     }
 
@@ -128,6 +89,107 @@ impl QuinnDaemon {
     }
 }
 
+fn create_app_watcher(
+    apps: Arc<RwLock<AppCatalog>>,
+    classifier: Arc<RwLock<AppClassifier>>,
+) -> Option<RecommendedWatcher> {
+    let debounce = Arc::new(Mutex::new(Instant::now() - APP_EVENT_DEBOUNCE));
+    let callback_apps = Arc::clone(&apps);
+    let callback_classifier = Arc::clone(&classifier);
+    let callback_debounce = Arc::clone(&debounce);
+
+    let mut watcher = match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else {
+            warn!("application desktop-file watcher reported an error");
+            return;
+        };
+
+        if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)) {
+            return;
+        }
+
+        let Ok(mut last_event) = callback_debounce.lock() else {
+            warn!("application watcher debounce lock is poisoned");
+            return;
+        };
+        if last_event.elapsed() < APP_EVENT_DEBOUNCE {
+            return;
+        }
+        *last_event = Instant::now();
+        drop(last_event);
+
+        refresh_app_intelligence(&callback_apps, &callback_classifier);
+    }) {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            warn!(%error, "failed to create application desktop-file watcher");
+            return None;
+        }
+    };
+
+    let mut watched = 0usize;
+    for path in application_watch_paths() {
+        if !path.is_dir() {
+            continue;
+        }
+        match watcher.watch(&path, RecursiveMode::NonRecursive) {
+            Ok(()) => watched += 1,
+            Err(error) => warn!(path = %path.display(), %error, "failed to watch application directory"),
+        }
+    }
+
+    if watched == 0 {
+        warn!("no application directories could be watched");
+        return None;
+    }
+
+    info!(directories = watched, "live application intelligence watcher ready");
+    Some(watcher)
+}
+
+fn application_watch_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::with_capacity(4);
+    if let Some(home) = std::env::var_os("HOME") {
+        paths.push(PathBuf::from(home).join(".local/share/applications"));
+    }
+    paths.push(PathBuf::from("/usr/local/share/applications"));
+    paths.push(PathBuf::from("/usr/share/applications"));
+    paths.push(PathBuf::from("/usr/share/gnome/applications"));
+    paths
+}
+
+fn refresh_app_intelligence(apps: &RwLock<AppCatalog>, classifier: &RwLock<AppClassifier>) {
+    let old_count = apps.read().map(|catalog| catalog.len()).unwrap_or(0);
+    let old_classified = classifier
+        .read()
+        .map(|classifier| classifier.len())
+        .unwrap_or(0);
+
+    let Ok(mut apps_guard) = apps.write() else {
+        warn!("application catalog lock is poisoned");
+        return;
+    };
+    let Ok(mut classifier_guard) = classifier.write() else {
+        warn!("application classifier lock is poisoned");
+        return;
+    };
+
+    apps_guard.refresh();
+    classifier_guard.refresh();
+
+    let new_count = apps_guard.len();
+    let new_classified = classifier_guard.len();
+    if old_count != new_count || old_classified != new_classified {
+        info!(
+            old_count,
+            new_count,
+            old_classified,
+            new_classified,
+            "refreshed application intelligence"
+        );
+    }
+}
+
 #[interface(name = "org.quinn.Assistant", spawn = true)]
 impl QuinnDaemon {
     #[zbus(property, name = "Ready")]
@@ -148,8 +210,6 @@ impl QuinnDaemon {
                 "[]".to_string(),
             ));
         }
-
-        self.refresh_apps_if_stale();
 
         let mut responses = Vec::new();
         let mut executed = Vec::new();
