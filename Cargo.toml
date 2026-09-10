@@ -1,5 +1,5 @@
 [workspace]
-members = ["quinn-daemon"]
+members = ["quinn-daemon", "quinn-app"]
 resolver = "2"
 
 [workspace.package]
