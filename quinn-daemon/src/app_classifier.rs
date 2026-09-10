@@ -105,7 +105,9 @@ impl AppClassifier {
         self.apps
             .iter()
             .enumerate()
-            .filter_map(|(index, app)| capability_score(&requested, app).map(|score| (score, index)))
+            .filter_map(|(index, app)| {
+                capability_score(&requested, app).map(|score| (score, index))
+            })
             .min_by(|(score_a, index_a), (score_b, index_b)| {
                 score_a
                     .cmp(score_b)
