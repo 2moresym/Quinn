@@ -71,8 +71,9 @@ impl QuinnDaemon {
         }
     }
 
-    fn tool_schemas(&self) -> String {
-        [
+    fn tool_schemas() -> String {
+        format!(
+            "[{},{},{}]",
             TOOL_SCHEMAS.trim_start_matches('[').trim_end_matches(']'),
             REMINDER_TOOL_SCHEMA
                 .trim_start_matches('[')
@@ -80,13 +81,11 @@ impl QuinnDaemon {
             REMINDER_REMOVE_TOOL_SCHEMA
                 .trim_start_matches('[')
                 .trim_end_matches(']'),
-        ]
-        .join(",")
-        .pipe(|body| format!("[{body}]"))
+        )
     }
 
     fn execute_fragment(&self, fragment: &str) -> (String, Option<(ToolCall, String)>) {
-        let schemas = self.tool_schemas();
+        let schemas = Self::tool_schemas();
         let result = self.engine.run(fragment, &schemas);
         if let Some(err) = result.error() {
             self.play_response(VoiceClip::Sorry);
@@ -368,6 +367,10 @@ impl QuinnDaemon {
         Ok((response, tool_calls))
     }
 
+    /// Capture a short microphone utterance and transcribe it locally.
+    ///
+    /// The returned text is intentionally fed into the same `Ask` method by the UI,
+    /// keeping voice and typed requests on one intent/execution path.
     #[zbus(out_args("text"))]
     async fn listen(&self) -> fdo::Result<String> {
         let Some(voice) = self.voice.clone() else {
@@ -389,14 +392,4 @@ impl QuinnDaemon {
         args: &str,
         result: &str,
     ) -> zbus::Result<()>;
-}
-
-trait Pipe: Sized {
-    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T;
-}
-
-impl<T> Pipe for T {
-    fn pipe<U>(self, f: impl FnOnce(Self) -> U) -> U {
-        f(self)
-    }
 }
