@@ -14,6 +14,7 @@ const BUS_NAME = 'org.quinn.Assistant';
 const OBJECT_PATH = '/org/quinn/Assistant';
 const INTERFACE = 'org.quinn.Assistant';
 const RETRY_MS = 1500;
+const GREETING_INTERVAL_MS = 60 * 60 * 1000;
 const VOICE_DIR = GLib.build_filenamev([GLib.get_user_data_dir(), 'quinn', 'voices', 'female']);
 
 const QuinnButton = GObject.registerClass(
@@ -26,6 +27,7 @@ class QuinnButton extends PanelMenu.Button {
         this._status = null;
         this._retrySource = 0;
         this._signalId = 0;
+        this._greetingResetSource = 0;
         this._busy = false;
         this._greeted = false;
 
@@ -67,7 +69,8 @@ class QuinnButton extends PanelMenu.Button {
         this.menu.connect('open-state-changed', (_menu, open) => {
             if (open && !this._busy) {
                 this._entry.grab_key_focus();
-                this._playGreeting();
+                if (!this._greeted)
+                    this._playGreeting();
             }
         });
 
@@ -99,13 +102,26 @@ class QuinnButton extends PanelMenu.Button {
                 : hour >= 18 && hour <= 21
                     ? 'Good_Evening.wav'
                     : 'Good_Night.wav';
-        this._greeted = this._playClip(filename);
+        if (this._playClip(filename)) {
+            this._greeted = true;
+            if (this._greetingResetSource)
+                GLib.source_remove(this._greetingResetSource);
+            this._greetingResetSource = GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT,
+                GREETING_INTERVAL_MS,
+                () => {
+                    this._greeted = false;
+                    this._greetingResetSource = 0;
+                    return GLib.SOURCE_REMOVE;
+                },
+            );
+        }
     }
 
     _connectProxy() {
         this._disconnectProxy();
         try {
-            this._proxy = Gio.DBusProxy.new_for_bus_sync(
+            Gio.DBusProxy.new_for_bus(
                 Gio.BusType.SESSION,
                 Gio.DBusProxyFlags.NONE,
                 null,
@@ -113,20 +129,30 @@ class QuinnButton extends PanelMenu.Button {
                 OBJECT_PATH,
                 INTERFACE,
                 null,
+                (source, result) => {
+                    try {
+                        this._proxy = Gio.DBusProxy.new_for_bus_finish(result);
+                        this._signalId = this._proxy.connectSignal('ToolExecuted', (_proxy, _sender, parameters) => {
+                            const [name, _args, toolResult] = parameters.deep_unpack();
+                            this._status.set_text(`Executed ${name}: ${toolResult}`);
+                            this._busy = false;
+                            this._voice.reactive = true;
+                            this._entry.reactive = true;
+                        });
+                        this._status.set_text('Ready');
+                    } catch (e) {
+                        this._proxy = null;
+                        this._status.set_text('Waiting for Quinn daemon…');
+                        this._scheduleReconnect();
+                        logError(e, 'Quinn D-Bus service is unavailable');
+                    }
+                },
             );
-            this._signalId = this._proxy.connectSignal('ToolExecuted', (_proxy, _sender, parameters) => {
-                const [name, _args, result] = parameters.deep_unpack();
-                this._status.set_text(`Executed ${name}: ${result}`);
-                this._busy = false;
-                this._voice.reactive = true;
-                this._entry.reactive = true;
-            });
-            this._status.set_text('Ready');
         } catch (e) {
             this._proxy = null;
             this._status.set_text('Waiting for Quinn daemon…');
             this._scheduleReconnect();
-            logError(e, 'Quinn D-Bus service is unavailable');
+            logError(e, 'Quinn D-Bus proxy setup failed');
         }
     }
 
@@ -237,6 +263,10 @@ class QuinnButton extends PanelMenu.Button {
         if (this._retrySource) {
             GLib.source_remove(this._retrySource);
             this._retrySource = 0;
+        }
+        if (this._greetingResetSource) {
+            GLib.source_remove(this._greetingResetSource);
+            this._greetingResetSource = 0;
         }
         this._disconnectProxy();
         super.destroy();
