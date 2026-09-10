@@ -35,7 +35,9 @@ pub fn parse_tool_call(raw: &str) -> Result<ToolCall, String> {
             .into_iter()
             .next()
             .ok_or_else(|| "empty tool call array".to_string())
-            .and_then(|v| serde_json::from_value(v).map_err(|e| format!("invalid tool call: {e}"))),
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| format!("invalid tool call: {e}"))
+            }),
         _ => Err("tool call must be an object or array".to_string()),
     }
 }
@@ -231,8 +233,9 @@ fn search_files(query: &str) -> Result<String, String> {
         return Err("file search query contains no searchable text".to_string());
     }
 
+    let home_path = Path::new(&home);
     let mut candidates = Vec::new();
-    collect_search_paths(&home, &mut candidates);
+    collect_search_paths(home_path, &mut candidates);
 
     let mut ranked: Vec<(SearchScore, PathBuf)> = candidates
         .into_iter()
