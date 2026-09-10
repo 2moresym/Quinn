@@ -32,19 +32,16 @@ pub struct AppCatalog {
 impl AppCatalog {
     pub fn discover() -> Self {
         let mut catalog = Self::default();
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let mut dirs = Vec::with_capacity(4);
-        if let Some(home) = home {
-            dirs.push(home.join(".local/share/applications"));
-        }
-        dirs.push(PathBuf::from("/usr/local/share/applications"));
-        dirs.push(PathBuf::from("/usr/share/applications"));
-        dirs.push(PathBuf::from("/usr/share/gnome/applications"));
-
-        for dir in dirs {
-            catalog.scan_dir(&dir);
-        }
+        catalog.refresh();
         catalog
+    }
+
+    pub fn refresh(&mut self) {
+        let mut fresh = Self::default();
+        for dir in application_dirs() {
+            fresh.scan_dir(&dir);
+        }
+        *self = fresh;
     }
 
     pub fn len(&self) -> usize {
@@ -125,6 +122,17 @@ impl AppCatalog {
             }
         }
     }
+}
+
+fn application_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::with_capacity(4);
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join(".local/share/applications"));
+    }
+    dirs.push(PathBuf::from("/usr/local/share/applications"));
+    dirs.push(PathBuf::from("/usr/share/applications"));
+    dirs.push(PathBuf::from("/usr/share/gnome/applications"));
+    dirs
 }
 
 fn score_match(requested: &str, app: &AppEntry) -> Option<u8> {
