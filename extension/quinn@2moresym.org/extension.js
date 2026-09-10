@@ -14,6 +14,7 @@ const BUS_NAME = 'org.quinn.Assistant';
 const OBJECT_PATH = '/org/quinn/Assistant';
 const INTERFACE = 'org.quinn.Assistant';
 const RETRY_MS = 1500;
+const VOICE_DIR = GLib.build_filenamev([GLib.get_user_data_dir(), 'quinn', 'voices', 'female']);
 
 const QuinnButton = GObject.registerClass(
 class QuinnButton extends PanelMenu.Button {
@@ -26,6 +27,7 @@ class QuinnButton extends PanelMenu.Button {
         this._retrySource = 0;
         this._signalId = 0;
         this._busy = false;
+        this._greeted = false;
 
         const icon = new St.Icon({
             icon_name: 'system-search-symbolic',
@@ -63,11 +65,41 @@ class QuinnButton extends PanelMenu.Button {
         this._entry.clutter_text.connect('activate', () => this._submit());
         this._voice.connect('clicked', () => this._listen());
         this.menu.connect('open-state-changed', (_menu, open) => {
-            if (open && !this._busy)
+            if (open && !this._busy) {
                 this._entry.grab_key_focus();
+                this._playGreeting();
+            }
         });
 
         this._connectProxy();
+    }
+
+    _playClip(filename) {
+        const path = GLib.build_filenamev([VOICE_DIR, filename]);
+        if (!GLib.file_test(path, GLib.FileTest.IS_REGULAR))
+            return false;
+
+        for (const program of ['pw-play', 'paplay', 'aplay']) {
+            try {
+                Gio.Subprocess.newv([program, path], Gio.SubprocessFlags.NONE);
+                return true;
+            } catch (e) {
+                // Try the next installed audio player.
+            }
+        }
+        return false;
+    }
+
+    _playGreeting() {
+        const hour = new Date().getHours();
+        const filename = hour >= 5 && hour <= 11
+            ? 'Good_Morning.wav'
+            : hour >= 12 && hour <= 17
+                ? 'Good_Afternoon.wav'
+                : hour >= 18 && hour <= 21
+                    ? 'Good_Evening.wav'
+                    : 'Good_Night.wav';
+        this._greeted = this._playClip(filename);
     }
 
     _connectProxy() {
@@ -168,29 +200,37 @@ class QuinnButton extends PanelMenu.Button {
             return;
 
         this._setBusy('Listening…');
-        this._proxy.call(
-            'Listen',
-            null,
-            Gio.DBusCallFlags.NONE,
-            -1,
-            null,
-            (proxy, result) => {
-                try {
-                    const reply = proxy.call_finish(result).deep_unpack();
-                    const text = reply[0]?.trim() ?? '';
-                    if (!text) {
-                        this._finishBusy('No speech detected.');
-                        return;
+        this._playClip('Hmm.wav');
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 350, () => {
+            if (!this._proxy) {
+                this._finishBusy('Quinn daemon is not ready.');
+                return GLib.SOURCE_REMOVE;
+            }
+            this._proxy.call(
+                'Listen',
+                null,
+                Gio.DBusCallFlags.NONE,
+                -1,
+                null,
+                (proxy, result) => {
+                    try {
+                        const reply = proxy.call_finish(result).deep_unpack();
+                        const text = reply[0]?.trim() ?? '';
+                        if (!text) {
+                            this._finishBusy('No speech detected.');
+                            return;
+                        }
+                        this._entry.set_text(text);
+                        this._ask(text);
+                    } catch (e) {
+                        this._finishBusy('Voice input is unavailable.');
+                        logError(e, 'Quinn voice request failed');
+                        this._connectProxy();
                     }
-                    this._entry.set_text(text);
-                    this._ask(text);
-                } catch (e) {
-                    this._finishBusy('Voice input is unavailable.');
-                    logError(e, 'Quinn voice request failed');
-                    this._connectProxy();
-                }
-            },
-        );
+                },
+            );
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     destroy() {
