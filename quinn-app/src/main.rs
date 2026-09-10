@@ -4,28 +4,13 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::rc::Rc;
-use zbus::proxy;
+use zbus::Proxy;
 
 const APP_ID: &str = "org.quinn.AssistantApp";
 const BUS_NAME: &str = "org.quinn.Assistant";
 const OBJECT_PATH: &str = "/org/quinn/Assistant";
+const INTERFACE: &str = "org.quinn.Assistant";
 const VOICE_DIR: &str = ".local/share/quinn/voices/female";
-
-#[proxy(
-    interface = "org.quinn.Assistant",
-    default_service = "org.quinn.Assistant",
-    default_path = "/org/quinn/Assistant"
-)]
-trait QuinnAssistant {
-    #[zbus(name = "Ask")]
-    async fn ask(&self, query: &str) -> zbus::Result<(String, String)>;
-
-    #[zbus(name = "Listen")]
-    async fn listen(&self) -> zbus::Result<String>;
-
-    #[zbus(property, name = "Ready")]
-    async fn ready(&self) -> zbus::Result<bool>;
-}
 
 fn user_data_path(relative: &str) -> PathBuf {
     glib::user_data_dir().join(relative)
@@ -71,18 +56,8 @@ fn start_daemon() -> Option<Child> {
     Command::new(binary).spawn().ok()
 }
 
-async fn connect_proxy() -> Result<QuinnAssistantProxy<'static>, String> {
-    let connection = zbus::Connection::session()
-        .await
-        .map_err(|e| e.to_string())?;
-    QuinnAssistantProxy::builder(&connection)
-        .destination(BUS_NAME)
-        .map_err(|e| e.to_string())?
-        .path(OBJECT_PATH)
-        .map_err(|e| e.to_string())?
-        .build()
-        .await
-        .map_err(|e| e.to_string())
+async fn make_proxy(connection: &zbus::Connection) -> Result<Proxy<'_>, zbus::Error> {
+    Proxy::new(connection, BUS_NAME, OBJECT_PATH, INTERFACE).await
 }
 
 fn main() {
@@ -141,12 +116,18 @@ fn main() {
         let status_clone = status.clone();
         let connected_clone = connected.clone();
         glib::MainContext::default().spawn_local(async move {
-            match connect_proxy().await {
-                Ok(proxy) if proxy.ready().await.unwrap_or(false) => {
-                    connected_clone.set(true);
-                    status_clone.set_text("Ready");
-                }
-                _ => status_clone.set_text("Waiting for Quinn daemon…"),
+            match zbus::Connection::session().await {
+                Ok(connection) => match make_proxy(&connection).await {
+                    Ok(proxy) => match proxy.get_property::<bool>("Ready").await {
+                        Ok(true) => {
+                            connected_clone.set(true);
+                            status_clone.set_text("Ready");
+                        }
+                        _ => status_clone.set_text("Waiting for Quinn daemon…"),
+                    },
+                    Err(_) => status_clone.set_text("Waiting for Quinn daemon…"),
+                },
+                Err(_) => status_clone.set_text("Could not connect to session bus."),
             }
         });
 
@@ -166,16 +147,19 @@ fn main() {
                 let output_buffer = output_buffer.clone();
                 let status = status.clone();
                 glib::MainContext::default().spawn_local(async move {
-                    match connect_proxy().await {
-                        Ok(proxy) => match proxy.ask(&query).await {
-                            Ok((response, _)) => {
-                                output_buffer.set_text(&format!("You: {query}\n\nQuinn: {response}"));
-                                status.set_text("Ready");
-                                entry.set_text("");
-                            }
-                            Err(_) => status.set_text("Quinn could not process that request."),
+                    match zbus::Connection::session().await {
+                        Ok(connection) => match make_proxy(&connection).await {
+                            Ok(proxy) => match proxy.call::<(String, String)>("Ask", &(query.clone(),)).await {
+                                Ok((response, _)) => {
+                                    output_buffer.set_text(&format!("You: {query}\n\nQuinn: {response}"));
+                                    status.set_text("Ready");
+                                    entry.set_text("");
+                                }
+                                Err(_) => status.set_text("Quinn could not process that request."),
+                            },
+                            Err(_) => status.set_text("Quinn daemon is unavailable."),
                         },
-                        Err(_) => status.set_text("Quinn daemon is unavailable."),
+                        Err(_) => status.set_text("Session bus unavailable."),
                     }
                 });
             })
@@ -202,23 +186,26 @@ fn main() {
             let status = status_voice.clone();
             glib::timeout_add_local_once(std::time::Duration::from_millis(350), move || {
                 glib::MainContext::default().spawn_local(async move {
-                    match connect_proxy().await {
-                        Ok(proxy) => match proxy.listen().await {
-                            Ok(text) if !text.trim().is_empty() => {
-                                entry.set_text(&text);
-                                status.set_text("Heard you — working…");
-                                match proxy.ask(&text).await {
-                                    Ok((response, _)) => {
-                                        output.set_text(&format!("You: {text}\n\nQuinn: {response}"));
-                                        status.set_text("Ready");
+                    match zbus::Connection::session().await {
+                        Ok(connection) => match make_proxy(&connection).await {
+                            Ok(proxy) => match proxy.call::<String>("Listen", &()).await {
+                                Ok(text) if !text.trim().is_empty() => {
+                                    entry.set_text(&text);
+                                    status.set_text("Heard you — working…");
+                                    match proxy.call::<(String, String)>("Ask", &(text.clone(),)).await {
+                                        Ok((response, _)) => {
+                                            output.set_text(&format!("You: {text}\n\nQuinn: {response}"));
+                                            status.set_text("Ready");
+                                        }
+                                        Err(_) => status.set_text("Quinn could not process that request."),
                                     }
-                                    Err(_) => status.set_text("Quinn could not process that request."),
                                 }
-                            }
-                            Ok(_) => status.set_text("No speech detected."),
-                            Err(_) => status.set_text("Voice input is unavailable."),
+                                Ok(_) => status.set_text("No speech detected."),
+                                Err(_) => status.set_text("Voice input is unavailable."),
+                            },
+                            Err(_) => status.set_text("Quinn daemon is unavailable."),
                         },
-                        Err(_) => status.set_text("Quinn daemon is unavailable."),
+                        Err(_) => status.set_text("Session bus unavailable."),
                     }
                 });
             });
