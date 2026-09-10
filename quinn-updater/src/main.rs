@@ -1,20 +1,33 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{env, fs, io::{Read, Write}, path::{Path, PathBuf}, process::Command};
+use std::{
+    env,
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const API: &str = "https://api.github.com/repos/2moresym/Quinn/releases/latest";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let install_dir = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".local/bin")
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+            .join(".local/bin")
     });
 
-    let release: Value = ureq::get(API)
+    let mut response = ureq::get(API)
         .header("User-Agent", "Quinn-Updater")
-        .call()?
-        .body_mut()
-        .read_json()?;
-    let tag = release["tag_name"].as_str().ok_or("latest release has no tag_name")?;
+        .call()?;
+    let mut json = Vec::new();
+    response.body_mut().as_reader().read_to_end(&mut json)?;
+    let release: Value = serde_json::from_slice(&json)?;
+
+    let tag = release["tag_name"]
+        .as_str()
+        .ok_or("latest release has no tag_name")?;
     let asset_name = format!("quinn-{tag}-linux-x86_64.tar.gz");
     let checksum_name = format!("{asset_name}.sha256");
     let archive_url = asset_url(&release, &asset_name)?;
@@ -31,29 +44,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let extract = temp.join("extract");
     fs::create_dir_all(&extract)?;
-    let status = Command::new("tar").args(["-xzf"]).arg(&archive).arg("-C").arg(&extract).status()?;
-    if !status.success() { return Err("failed to extract Quinn update".into()); }
+    let status = Command::new("tar")
+        .args(["-xzf"])
+        .arg(&archive)
+        .arg("-C")
+        .arg(&extract)
+        .status()?;
+    if !status.success() {
+        return Err("failed to extract Quinn update".into());
+    }
 
     let bundle = extract.join("Quinn");
     fs::create_dir_all(&install_dir)?;
     for name in ["quinn-app", "quinn-daemon", "quinn-updater"] {
         let src = bundle.join(name);
-        if !src.is_file() { return Err(format!("release is missing required binary: {name}").into()); }
-        let dst = install_dir.join(name);
-        let tmp_dst = install_dir.join(format!(".{name}.new"));
-        fs::copy(src, &tmp_dst)?;
-        fs::set_permissions(&tmp_dst, fs::Permissions::from_mode(0o755))?;
-        fs::rename(tmp_dst, dst)?;
+        if !src.is_file() {
+            return Err(format!("release is missing required binary: {name}").into());
+        }
+        atomic_replace(&src, &install_dir.join(name), 0o755)?;
     }
 
-    let lib_src = bundle.join("libvosk.so");
-    if lib_src.is_file() {
-        let data_dir = install_dir.parent().unwrap_or(&install_dir).join("share/quinn/vosk");
+    if bundle.join("libvosk.so").is_file() {
+        let data_dir = install_dir
+            .parent()
+            .unwrap_or(&install_dir)
+            .join("share/quinn/vosk");
         fs::create_dir_all(&data_dir)?;
-        let tmp_lib = data_dir.join(".libvosk.so.new");
-        fs::copy(lib_src, &tmp_lib)?;
-        fs::set_permissions(&tmp_lib, fs::Permissions::from_mode(0o644))?;
-        fs::rename(tmp_lib, data_dir.join("libvosk.so"))?;
+        atomic_replace(
+            &bundle.join("libvosk.so"),
+            &data_dir.join("libvosk.so"),
+            0o644,
+        )?;
+    }
+
+    if bundle.join("quinn.svg").is_file() {
+        let icon_dir = install_dir
+            .parent()
+            .unwrap_or(&install_dir)
+            .join("share/icons/hicolor/scalable/apps");
+        fs::create_dir_all(&icon_dir)?;
+        atomic_replace(&bundle.join("quinn.svg"), &icon_dir.join("quinn.svg"), 0o644)?;
     }
 
     fs::remove_dir_all(temp).ok();
@@ -62,7 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn asset_url(release: &Value, name: &str) -> Result<String, Box<dyn std::error::Error>> {
-    release["assets"].as_array()
+    release["assets"]
+        .as_array()
         .and_then(|assets| assets.iter().find(|a| a["name"].as_str() == Some(name)))
         .and_then(|asset| asset["browser_download_url"].as_str())
         .map(str::to_owned)
@@ -76,24 +107,42 @@ fn download(url: &str, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         file.write_all(&buf[..n])?;
     }
     Ok(())
 }
 
 fn verify_sha256(path: &Path, checksum: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let expected = fs::read_to_string(checksum)?.split_whitespace().next().ok_or("empty checksum")?.to_owned();
+    let expected = fs::read_to_string(checksum)?
+        .split_whitespace()
+        .next()
+        .ok_or("empty checksum")?
+        .to_owned();
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = file.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     let actual = format!("{:x}", hasher.finalize());
-    if actual != expected { return Err("Quinn update checksum verification failed".into()); }
+    if actual != expected {
+        return Err("Quinn update checksum verification failed".into());
+    }
+    Ok(())
+}
+
+fn atomic_replace(source: &Path, destination: &Path, mode: u32) -> Result<(), Box<dyn std::error::Error>> {
+    let temp = destination.with_extension(format!("new.{}", std::process::id()));
+    fs::copy(source, &temp)?;
+    fs::set_permissions(&temp, fs::Permissions::from_mode(mode))?;
+    fs::rename(temp, destination)?;
     Ok(())
 }
 
