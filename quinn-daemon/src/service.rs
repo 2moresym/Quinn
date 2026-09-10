@@ -71,10 +71,16 @@ impl QuinnDaemon {
     }
 
     fn execute_fragment(&self, fragment: &str) -> (String, Option<(ToolCall, String)>) {
-        let schemas = format!("[{}]", [
-            TOOL_SCHEMAS.trim_start_matches('[').trim_end_matches(']'),
-            REMINDER_TOOL_SCHEMA.trim_start_matches('[').trim_end_matches(']'),
-        ].join(","));
+        let schemas = format!(
+            "[{}]",
+            [
+                TOOL_SCHEMAS.trim_start_matches('[').trim_end_matches(']'),
+                REMINDER_TOOL_SCHEMA
+                    .trim_start_matches('[')
+                    .trim_end_matches(']'),
+            ]
+            .join(",")
+        );
         let result = self.engine.run(fragment, &schemas);
         if let Some(err) = result.error() {
             self.play_response(VoiceClip::Sorry);
@@ -153,10 +159,7 @@ impl QuinnDaemon {
                 self.play_response(VoiceClip::TimerSet);
                 (
                     format!("Reminder set for {} seconds from now.", delay),
-                    Some((
-                        call.clone(),
-                        format!("created reminder #{}", reminder.id),
-                    )),
+                    Some((call.clone(), format!("created reminder #{}", reminder.id))),
                 )
             }
             Err(error) => {
@@ -179,34 +182,38 @@ fn create_app_watcher(
     let callback_classifier = Arc::clone(&classifier);
     let callback_debounce = Arc::clone(&debounce);
 
-    let mut watcher = match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-        let Ok(event) = result else {
-            warn!("application desktop-file watcher reported an error");
-            return;
+    let mut watcher =
+        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            let Ok(event) = result else {
+                warn!("application desktop-file watcher reported an error");
+                return;
+            };
+
+            if !matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+            ) {
+                return;
+            }
+
+            let Ok(mut last_event) = callback_debounce.lock() else {
+                warn!("application watcher debounce lock is poisoned");
+                return;
+            };
+            if last_event.elapsed() < APP_EVENT_DEBOUNCE {
+                return;
+            }
+            *last_event = Instant::now();
+            drop(last_event);
+
+            refresh_app_intelligence(&callback_apps, &callback_classifier);
+        }) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                warn!(%error, "failed to create application desktop-file watcher");
+                return None;
+            }
         };
-
-        if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)) {
-            return;
-        }
-
-        let Ok(mut last_event) = callback_debounce.lock() else {
-            warn!("application watcher debounce lock is poisoned");
-            return;
-        };
-        if last_event.elapsed() < APP_EVENT_DEBOUNCE {
-            return;
-        }
-        *last_event = Instant::now();
-        drop(last_event);
-
-        refresh_app_intelligence(&callback_apps, &callback_classifier);
-    }) {
-        Ok(watcher) => watcher,
-        Err(error) => {
-            warn!(%error, "failed to create application desktop-file watcher");
-            return None;
-        }
-    };
 
     let mut watched = 0usize;
     for path in application_watch_paths() {
@@ -215,7 +222,9 @@ fn create_app_watcher(
         }
         match watcher.watch(&path, RecursiveMode::NonRecursive) {
             Ok(()) => watched += 1,
-            Err(error) => warn!(path = %path.display(), %error, "failed to watch application directory"),
+            Err(error) => {
+                warn!(path = %path.display(), %error, "failed to watch application directory")
+            }
         }
     }
 
@@ -224,7 +233,10 @@ fn create_app_watcher(
         return None;
     }
 
-    info!(directories = watched, "live application intelligence watcher ready");
+    info!(
+        directories = watched,
+        "live application intelligence watcher ready"
+    );
     Some(watcher)
 }
 
@@ -322,12 +334,7 @@ impl QuinnDaemon {
             .read()
             .map(|classifier| classifier.len())
             .unwrap_or(0);
-        info!(
-            query,
-            app_count,
-            classified_app_count,
-            "handled request"
-        );
+        info!(query, app_count, classified_app_count, "handled request");
         Ok((response, tool_calls))
     }
 
