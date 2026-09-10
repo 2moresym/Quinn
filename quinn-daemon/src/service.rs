@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    sync::{Arc, Mutex, RwLock},
+    time::{Duration, Instant},
+};
 
 use needle_infer::v2_engine::V2Engine;
 use serde_json::json;
@@ -14,26 +17,71 @@ use crate::{
 };
 
 const CONFIDENCE_THRESHOLD: f32 = 0.70;
+const APP_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
 pub struct QuinnDaemon {
     engine: Arc<V2Engine>,
-    apps: Arc<AppCatalog>,
-    classifier: Arc<AppClassifier>,
+    apps: Arc<RwLock<AppCatalog>>,
+    classifier: Arc<RwLock<AppClassifier>>,
+    last_app_refresh: Mutex<Instant>,
     voice: Option<Arc<VoiceEngine>>,
 }
 
 impl QuinnDaemon {
     pub fn new(
         engine: Arc<V2Engine>,
-        apps: Arc<AppCatalog>,
-        classifier: Arc<AppClassifier>,
+        apps: Arc<RwLock<AppCatalog>>,
+        classifier: Arc<RwLock<AppClassifier>>,
         voice: Option<Arc<VoiceEngine>>,
     ) -> Self {
         Self {
             engine,
             apps,
             classifier,
+            last_app_refresh: Mutex::new(Instant::now()),
             voice,
+        }
+    }
+
+    fn refresh_apps_if_stale(&self) {
+        let Ok(mut last_refresh) = self.last_app_refresh.lock() else {
+            warn!("application refresh timer lock is poisoned");
+            return;
+        };
+        if last_refresh.elapsed() < APP_REFRESH_INTERVAL {
+            return;
+        }
+
+        let old_count = self.apps.read().map(|catalog| catalog.len()).unwrap_or(0);
+        let old_classified = self
+            .classifier
+            .read()
+            .map(|classifier| classifier.len())
+            .unwrap_or(0);
+
+        let Ok(mut apps) = self.apps.write() else {
+            warn!("application catalog lock is poisoned");
+            return;
+        };
+        let Ok(mut classifier) = self.classifier.write() else {
+            warn!("application classifier lock is poisoned");
+            return;
+        };
+
+        apps.refresh();
+        classifier.refresh();
+        *last_refresh = Instant::now();
+
+        let new_count = apps.len();
+        let new_classified = classifier.len();
+        if old_count != new_count || old_classified != new_classified {
+            info!(
+                old_count,
+                new_count,
+                old_classified,
+                new_classified,
+                "refreshed application intelligence"
+            );
         }
     }
 
@@ -101,6 +149,8 @@ impl QuinnDaemon {
             ));
         }
 
+        self.refresh_apps_if_stale();
+
         let mut responses = Vec::new();
         let mut executed = Vec::new();
 
@@ -125,10 +175,16 @@ impl QuinnDaemon {
             responses.join(" ")
         };
         let tool_calls = json!(executed).to_string();
+        let app_count = self.apps.read().map(|catalog| catalog.len()).unwrap_or(0);
+        let classified_app_count = self
+            .classifier
+            .read()
+            .map(|classifier| classifier.len())
+            .unwrap_or(0);
         info!(
             query,
-            app_count = self.apps.len(),
-            classified_app_count = self.classifier.len(),
+            app_count,
+            classified_app_count,
             "handled request"
         );
         Ok((response, tool_calls))
