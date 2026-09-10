@@ -25,14 +25,14 @@ impl VoiceEngine {
                 .map(PathBuf::from)
                 .or_else(default_model_path)
                 .ok_or_else(|| "could not determine the Vosk model path".to_string())?;
-            let model_path = path
-                .to_str()
-                .ok_or_else(|| format!("Vosk model path is not valid UTF-8: {}", path.display()))?;
+            let model_path = path.to_str().ok_or_else(|| {
+                format!("Vosk model path is not valid UTF-8: {}", path.display())
+            })?;
             let model = vosk::Model::new(model_path.to_owned())
                 .ok_or_else(|| format!("could not load Vosk model at {}", path.display()))?;
-            return Ok(Self {
+            Ok(Self {
                 model: Arc::new(model),
-            });
+            })
         }
 
         #[cfg(not(feature = "voice"))]
