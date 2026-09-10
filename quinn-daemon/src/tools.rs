@@ -124,6 +124,18 @@ fn open_application(
         ));
     }
 
+    if let Some(capability) = classifier.resolve_capability(requested) {
+        Command::new("gtk-launch")
+            .arg(&capability.id)
+            .spawn()
+            .map_err(|e| format!("failed to launch {}: {e}", capability.name))?;
+        return Ok(format!(
+            "opened {} ({})",
+            capability.name,
+            capability.app_type.as_str()
+        ));
+    }
+
     let app = apps.resolve(requested).ok_or_else(|| {
         let candidates = apps.candidate_names(requested, 3);
         if candidates.is_empty() {
