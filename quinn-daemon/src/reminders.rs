@@ -148,7 +148,10 @@ fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::ReminderStore;
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn test_store() -> ReminderStore {
         let suffix = SystemTime::now()
