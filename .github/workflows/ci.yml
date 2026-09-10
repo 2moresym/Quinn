@@ -17,8 +17,8 @@ jobs:
             vosk_url: "https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-x86_64-0.3.45.zip"
     steps:
       - uses: actions/checkout@v4
-      - name: Install Linux audio/build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev unzip curl
+      - name: Install Linux GUI/audio/build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libgtk-4-dev libasound2-dev unzip curl
       - name: Install native Vosk library
         if: matrix.name == 'voice'
         run: |
