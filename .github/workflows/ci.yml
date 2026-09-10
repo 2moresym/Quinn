@@ -7,6 +7,9 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: ["", "voice"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -14,5 +17,5 @@ jobs:
           toolchain: 1.87.0
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
-      - run: cargo check --workspace --all-targets
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo check --workspace --all-targets ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
+      - run: cargo clippy --workspace --all-targets ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }} -- -D warnings
