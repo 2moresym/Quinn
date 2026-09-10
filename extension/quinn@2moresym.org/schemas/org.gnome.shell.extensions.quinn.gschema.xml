@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.quinn" path="/org/gnome/shell/extensions/quinn/">
+    <key name="toggle-quinn" type="as">
+      <default>["&lt;Super&gt;space"]</default>
+      <summary>Toggle Quinn</summary>
+      <description>Global shortcut used to open the Quinn command popup.</description>
+    </key>
+  </schema>
+</schemalist>
