@@ -35,7 +35,9 @@ pub fn parse_tool_call(raw: &str) -> Result<ToolCall, String> {
             .into_iter()
             .next()
             .ok_or_else(|| "empty tool call array".to_string())
-            .and_then(|v| serde_json::from_value(v).map_err(|e| format!("invalid tool call: {e}"))),
+            .and_then(|v| {
+                serde_json::from_value(v).map_err(|e| format!("invalid tool call: {e}"))
+            }),
         _ => Err("tool call must be an object or array".to_string()),
     }
 }
@@ -283,7 +285,14 @@ impl PartialOrd for SearchScore {
 }
 
 fn collect_search_paths(home: &Path, output: &mut Vec<PathBuf>) {
-    const PRIORITY_DIRS: &[&str] = &["Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music"];
+    const PRIORITY_DIRS: &[&str] = &[
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Pictures",
+        "Videos",
+        "Music",
+    ];
 
     for dir in PRIORITY_DIRS {
         collect_files_bounded(&home.join(dir), 3, output);
@@ -321,28 +330,56 @@ fn collect_files_bounded(root: &Path, max_depth: usize, output: &mut Vec<PathBuf
 fn should_skip_dir(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name.starts_with('.') || matches!(name, "target" | "node_modules" | "__pycache__"))
+        .map(|name| {
+            name.starts_with('.') || matches!(name, "target" | "node_modules" | "__pycache__")
+        })
         .unwrap_or(false)
 }
 
 fn score_filename(name: &str, query: &str, query_tokens: &[String]) -> Option<SearchScore> {
     let normalized_name = normalize_search(name);
     if normalized_name == query {
-        return Some(SearchScore { class: 0, token_misses: 0, length: name.len() });
+        return Some(SearchScore {
+            class: 0,
+            token_misses: 0,
+            length: name.len(),
+        });
     }
     if normalized_name.starts_with(query) {
-        return Some(SearchScore { class: 1, token_misses: 0, length: name.len() });
+        return Some(SearchScore {
+            class: 1,
+            token_misses: 0,
+            length: name.len(),
+        });
     }
     let name_tokens = tokenize(&normalized_name);
-    let misses = query_tokens.iter().filter(|token| !name_tokens.iter().any(|name_token| name_token == *token)).count();
+    let misses = query_tokens
+        .iter()
+        .filter(|token| !name_tokens.iter().any(|name_token| name_token == *token))
+        .count();
     if misses == 0 {
-        return Some(SearchScore { class: 2, token_misses: 0, length: name.len() });
+        return Some(SearchScore {
+            class: 2,
+            token_misses: 0,
+            length: name.len(),
+        });
     }
     if normalized_name.contains(query) {
-        return Some(SearchScore { class: 3, token_misses: misses.min(u8::MAX as usize) as u8, length: name.len() });
+        return Some(SearchScore {
+            class: 3,
+            token_misses: misses.min(u8::MAX as usize) as u8,
+            length: name.len(),
+        });
     }
-    if query_tokens.iter().any(|token| normalized_name.contains(token)) {
-        return Some(SearchScore { class: 4, token_misses: misses.min(u8::MAX as usize) as u8, length: name.len() });
+    if query_tokens
+        .iter()
+        .any(|token| normalized_name.contains(token))
+    {
+        return Some(SearchScore {
+            class: 4,
+            token_misses: misses.min(u8::MAX as usize) as u8,
+            length: name.len(),
+        });
     }
     None
 }
